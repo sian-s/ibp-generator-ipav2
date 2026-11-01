@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAP IBP IPAV2 Master & KF Generator</title>
+<!-- ZIP generated server-side -->
+<style>
+:root {
+  --blue:#0a6ed1; --blue-dk:#0854a0; --blue-lt:#d1e8ff;
+  --green:#107e3e; --orange:#e76500; --gray:#6a6d70;
+  --light:#f5f6f7; --border:#d9d9d9; --radius:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"72",Arial,sans-serif;background:var(--light);color:#32363a;min-height:100vh}
+
+header{background:var(--blue);color:#fff;padding:0 2rem;height:56px;display:flex;align-items:center;gap:1rem;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+header .logo{font-size:1.4rem;font-weight:700}
+header .sub{font-size:.85rem;opacity:.85;border-left:1px solid rgba(255,255,255,.4);padding-left:1rem}
+
+/* ── Hero search ───────────────────────────────── */
+.hero{background:linear-gradient(135deg,#0a6ed1 0%,#0854a0 100%);padding:3rem 2rem;text-align:center;color:#fff}
+.hero h1{font-size:1.8rem;font-weight:700;margin-bottom:.5rem}
+.hero p{opacity:.85;margin-bottom:2rem;font-size:.95rem}
+.search-row{display:flex;max-width:600px;margin:0 auto;gap:.5rem}
+.search-row input{flex:1;padding:.8rem 1.2rem;font-size:1rem;border:none;border-radius:6px;font-family:inherit}
+.search-row input:focus{outline:2px solid #fff;outline-offset:2px}
+.btn-analyze{background:#fff;color:var(--blue);font-weight:700;padding:.8rem 1.8rem;border:none;border-radius:6px;font-size:1rem;font-family:inherit;cursor:pointer;transition:.2s;white-space:nowrap}
+.btn-analyze:hover{background:#e8f0fc}
+.btn-analyze:disabled{opacity:.6;cursor:not-allowed}
+
+/* ── Loader ──────────────────────────────────── */
+.loader{display:none;padding:2rem;text-align:center;background:#fff}
+.loader.active{display:block}
+.steps-progress{display:flex;justify-content:center;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap}
+.prog-step{font-size:.8rem;padding:.35rem .9rem;border-radius:20px;background:var(--light);color:var(--gray);border:1px solid var(--border);transition:.4s}
+.prog-step.active{background:var(--blue-lt);color:var(--blue);border-color:var(--blue);font-weight:600}
+.prog-step.done{background:#e6f4ea;color:var(--green);border-color:var(--green)}
+.spinner{width:40px;height:40px;border:4px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:1rem auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Result banner ───────────────────────────── */
+.result-banner{display:none;background:#fff;border-left:4px solid var(--green);padding:1.2rem 1.5rem;margin:1.5rem auto;max-width:960px;border-radius:var(--radius);box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.result-banner.active{display:flex;align-items:flex-start;gap:1.2rem;flex-wrap:wrap}
+.result-banner .icon{font-size:2rem;line-height:1}
+.result-banner h3{font-size:1.05rem;font-weight:700;margin-bottom:.2rem}
+.result-banner p{font-size:.85rem;color:var(--gray)}
+.meta-chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.5rem}
+.chip{font-size:.72rem;padding:2px 10px;border-radius:12px;background:var(--light);border:1px solid var(--border)}
+.chip.blue{background:var(--blue-lt);color:var(--blue-dk);border-color:var(--blue)}
+
+/* ── Pipeline nav ────────────────────────────── */
+.pipeline-bar{background:#fff;border-bottom:1px solid var(--border);padding:0 2rem;display:flex;gap:0}
+.p-step{padding:1rem 1.4rem;font-size:.85rem;color:var(--gray);border-bottom:3px solid transparent;cursor:pointer;display:flex;align-items:center;gap:.5rem;transition:.2s;white-space:nowrap}
+.p-step .n{width:22px;height:22px;border-radius:50%;background:var(--border);color:var(--gray);font-size:.72rem;font-weight:700;display:flex;align-items:center;justify-content:center}
+.p-step.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
+.p-step.active .n{background:var(--blue);color:#fff}
+.p-step.done .n{background:var(--green);color:#fff}
+.p-step.done{color:var(--green)}
+
+/* ── Cards ───────────────────────────────────── */
+.main{max-width:960px;margin:2rem auto;padding:0 1rem}
+.card{background:#fff;border-radius:var(--radius);box-shadow:0 1px 4px rgba(0,0,0,.08);padding:2rem;margin-bottom:1.5rem}
+.card-title{font-size:1.1rem;font-weight:600;margin-bottom:.25rem}
+.card-sub{font-size:.85rem;color:var(--gray);margin-bottom:1.5rem}
+
+/* ── Form ────────────────────────────────────── */
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-bottom:1.25rem}
+.form-row.three{grid-template-columns:1fr 1fr 1fr}
+.form-row.single{grid-template-columns:1fr}
+.form-group{display:flex;flex-direction:column;gap:.4rem}
+label{font-size:.82rem;font-weight:600}
+label .req{color:#bb0000}
+input,select{border:1px solid var(--border);border-radius:4px;padding:.5rem .75rem;font-size:.9rem;font-family:inherit;background:#fff}
+input:focus,select:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 2px rgba(10,110,209,.12)}
+.field-hint{font-size:.75rem;color:var(--gray)}
+.custid-val{font-family:monospace;font-size:1.1rem;font-weight:700;color:var(--blue);background:var(--blue-lt);padding:.4rem .75rem;border-radius:4px;display:inline-block;margin-top:.3rem}
+.region-tag{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:12px;background:var(--blue-lt);color:var(--blue-dk);margin-top:.25rem}
+
+/* ── Customers list (step 1 with multiple) ─── */
+.cust-list{display:flex;flex-direction:column;gap:1rem;margin-bottom:1.5rem}
+.cust-item{border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.25rem;display:grid;grid-template-columns:auto 1fr auto;gap:1rem;align-items:start}
+.cust-item .cust-num{font-size:1.4rem;font-weight:700;color:var(--blue);min-width:2rem;text-align:center;line-height:1.2;padding-top:.2rem}
+.cust-item-fields{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:.75rem}
+.cust-remove{cursor:pointer;color:#bb0000;font-size:1.2rem;padding:.25rem;line-height:1;background:none;border:none}
+.btn-add-cust{background:none;border:1px dashed var(--blue);color:var(--blue);border-radius:4px;padding:.5rem 1rem;font-size:.85rem;font-family:inherit;cursor:pointer;width:100%;margin-bottom:1rem}
+.btn-add-cust:hover{background:var(--blue-lt)}
+
+/* ── Product grid ─────────────────────────── */
+.product-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:1rem;margin-bottom:1.5rem}
+.product-card{border:2px solid var(--border);border-radius:var(--radius);padding:1rem;cursor:pointer;transition:.2s;position:relative}
+.product-card:hover{border-color:var(--blue);background:#f0f7ff}
+.product-card.selected{border-color:var(--blue);background:var(--blue-lt)}
+.product-card.selected::after{content:"✓";position:absolute;top:8px;right:10px;color:var(--blue);font-weight:700}
+.pf-family{font-size:.7rem;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.5px}
+.pf-name{font-size:.95rem;font-weight:600;margin:.3rem 0}
+.pf-badge{display:inline-block;font-size:.65rem;padding:1px 6px;border-radius:10px;margin:2px;background:#e8f4e8;color:var(--green)}
+.pf-meta{font-size:.72rem;color:var(--gray);margin-top:.4rem}
+
+/* ── Location grid ────────────────────────── */
+.loc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(195px,1fr));gap:.75rem;margin-bottom:1rem}
+.loc-card{border:2px solid var(--border);border-radius:var(--radius);padding:.85rem 1rem;cursor:pointer;transition:.2s;display:flex;align-items:flex-start;gap:.75rem}
+.loc-card:hover{border-color:var(--blue)}
+.loc-card.selected{border-color:var(--blue);background:var(--blue-lt)}
+.loc-icon{font-size:1.4rem;line-height:1}
+.loc-id{font-size:.7rem;font-weight:700;color:var(--blue)}
+.loc-desc{font-size:.85rem;font-weight:600}
+.loc-region{font-size:.72rem;color:var(--gray)}
+
+/* ── Preview ───────────────────────────── */
+.preview-title{font-size:.82rem;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:.5px;margin:1.25rem 0 .5rem}
+.preview-table{width:100%;border-collapse:collapse;font-size:.78rem;display:block;overflow-x:auto}
+.preview-table th{background:#f0f4f8;padding:.4rem .6rem;text-align:left;font-weight:700;border:1px solid var(--border);white-space:nowrap}
+.preview-table td{padding:.35rem .6rem;border:1px solid var(--border);white-space:nowrap}
+.preview-table tr:hover td{background:#fafbfc}
+.file-list{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.5rem;margin-bottom:1rem}
+.file-chip{font-size:.75rem;padding:.25rem .75rem;border-radius:20px;background:var(--light);border:1px solid var(--border);display:flex;align-items:center;gap:.35rem}
+.file-chip .type{font-weight:700;color:var(--blue)}
+.summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.5rem}
+.summary-tile{background:var(--light);border-radius:var(--radius);padding:1rem;text-align:center}
+.summary-tile .val{font-size:1.8rem;font-weight:700;color:var(--blue)}
+.summary-tile .lbl{font-size:.75rem;color:var(--gray);margin-top:.25rem}
+
+/* ── Buttons ─────────────────────────── */
+.btn{padding:.6rem 1.5rem;border-radius:4px;font-size:.9rem;font-weight:600;font-family:inherit;cursor:pointer;border:none;transition:.2s}
+.btn-primary{background:var(--blue);color:#fff}
+.btn-primary:hover{background:var(--blue-dk)}
+.btn-secondary{background:#fff;color:var(--blue);border:1px solid var(--blue)}
+.btn-secondary:hover{background:var(--blue-lt)}
+.btn-success{background:var(--green);color:#fff;font-size:1rem;padding:.75rem 2rem}
+.btn-success:hover{background:#0b6b35}
+.btn-row{display:flex;gap:.75rem;align-items:center;margin-top:1.5rem}
+.alert{padding:.75rem 1rem;border-radius:4px;font-size:.85rem;margin-bottom:1rem}
+.alert-info{background:#e8f4ff;color:var(--blue-dk);border-left:3px solid var(--blue)}
+.alert-success{background:#e6f4ea;color:var(--green);border-left:3px solid var(--green)}
+
+/* ── Excel import modal ──────────────── */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.active{display:flex}
+.modal{background:#fff;border-radius:var(--radius);padding:2rem;max-width:560px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+.modal h3{font-size:1.1rem;font-weight:700;margin-bottom:.5rem}
+.modal p{font-size:.85rem;color:var(--gray);margin-bottom:1.25rem}
+.modal input{width:100%;padding:.6rem .85rem;border:1px solid var(--border);border-radius:4px;font-size:.85rem;font-family:monospace;margin-bottom:1rem}
+.modal input:focus{outline:none;border-color:var(--blue)}
+.modal-actions{display:flex;gap:.75rem;justify-content:flex-end}
+.btn-excel{background:#1d6f42;color:#fff;border:none;padding:.7rem 1.4rem;border-radius:4px;font-size:.9rem;font-weight:600;font-family:inherit;cursor:pointer}
+.btn-excel:hover{background:#155330}
+.search-row-wrap{display:flex;flex-direction:column;align-items:center;gap:.75rem}
+.import-or{font-size:.8rem;color:rgba(255,255,255,.7)}
+.btn-import-excel{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.5);padding:.65rem 1.4rem;border-radius:6px;font-size:.88rem;font-weight:600;font-family:inherit;cursor:pointer;transition:.2s}
+.btn-import-excel:hover{background:rgba(255,255,255,.25)}
+
+/* ── Product item edit table ─────────── */
+.pf-edit-panel{display:none;border-top:1px solid var(--border);margin-top:.75rem;padding-top:.75rem}
+.pf-edit-panel.open{display:block}
+.pf-items-table{width:100%;border-collapse:collapse;font-size:.78rem;margin-bottom:.5rem}
+.pf-items-table th{background:#f0f4f8;padding:.35rem .5rem;text-align:left;font-weight:700;border:1px solid var(--border)}
+.pf-items-table td{padding:.3rem .4rem;border:1px solid var(--border)}
+.pf-items-table input{border:none;background:transparent;font-size:.78rem;font-family:inherit;width:100%;padding:0}
+.pf-items-table input:focus{outline:1px solid var(--blue);border-radius:2px}
+.pf-items-table select{border:none;background:transparent;font-size:.78rem;font-family:inherit}
+.btn-pf-edit{background:none;border:1px solid var(--border);border-radius:3px;font-size:.7rem;padding:2px 7px;cursor:pointer;color:var(--gray);margin-top:.3rem}
+.btn-pf-edit:hover{border-color:var(--blue);color:var(--blue)}
+.btn-rm-item{background:none;border:none;color:#bb0000;cursor:pointer;font-size:1rem;padding:0 4px;line-height:1}
+.btn-add-item{background:none;border:1px dashed var(--blue);color:var(--blue);border-radius:3px;font-size:.75rem;padding:3px 10px;cursor:pointer;width:100%}
+.btn-add-item:hover{background:var(--blue-lt)}
+
+/* ── Location edit ───────────────────── */
+.loc-edit-icon{font-size:.75rem;margin-left:auto;cursor:pointer;color:var(--gray);padding:2px 4px;border-radius:3px}
+.loc-edit-icon:hover{color:var(--blue);background:var(--blue-lt)}
+.loc-edit-row{display:none;padding:.5rem .75rem;background:#f9fbff;border-top:1px solid var(--border);font-size:.78rem}
+.loc-edit-row.open{display:block}
+.loc-edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:.4rem .75rem}
+.loc-edit-grid label{font-size:.72rem;font-weight:600;color:var(--gray)}
+.loc-edit-grid input,.loc-edit-grid select{width:100%;padding:.3rem .5rem;border:1px solid var(--border);border-radius:3px;font-size:.78rem;font-family:inherit}
+.loc-card-wrap{border:2px solid var(--border);border-radius:var(--radius);overflow:hidden;transition:.2s;cursor:default}
+.loc-card-wrap:hover{border-color:#aac}
+.loc-card-wrap.selected{border-color:var(--blue);background:var(--blue-lt)}
+
+/* ── Step panels ─────────────────────── */
+.step-panel{display:none}
+.step-panel.active{display:block}
+#pipeline-area{display:none}
+#pipeline-area.active{display:block}
+
+.section-label{font-size:.82rem;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:.5px;margin:1rem 0 .5rem}
+
+@media(max-width:640px){
+  .form-row,.form-row.three{grid-template-columns:1fr}
+  .summary-grid{grid-template-columns:1fr 1fr}
+  .cust-item-fields{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">SAP IBP <span style="color:#0070d2;font-size:0.75em;vertical-align:middle;background:#e8f4ff;padding:2px 8px;border-radius:10px;margin-left:6px">IPAV2</span></div>
+  <div class="sub">AI-Powered Master &amp; Key Figure Generator — Planning Area IPAV2 (Comma Format)</div>
+</header>
+
+<!-- ── Hero Search ── -->
+<div class="hero" id="heroSection">
+  <h1>Enter a company name, get IBP-ready data</h1>
+  <p>AI searches the web, analyzes the company's product portfolio &amp; global footprint,<br>and generates SAP IBP Master Data + Key Figure templates.</p>
+  <div class="search-row-wrap">
+    <div class="search-row">
+      <input type="text" id="companyInput" placeholder="e.g. LG Hausys, Samsung SDI, BASF, Volkswagen…" onkeydown="if(event.key==='Enter')analyze()">
+      <button class="btn-analyze" id="analyzeBtn" onclick="analyze()">Analyze with AI ✦</button>
+    </div>
+    <div class="import-or">— or —</div>
+    <button class="btn-import-excel" onclick="showImportModal()">📊 Import from Excel (고객 데이터 파일)</button>
+  </div>
+</div>
+
+<!-- ── Excel Import Modal ── -->
+<div class="modal-overlay" id="importModal" onclick="if(event.target===this)closeImportModal()">
+  <div class="modal">
+    <h3>📊 Excel 파일 업로드</h3>
+    <p>IBP 기준정보 요청서 Excel 파일을 선택하세요.<br>공장, 품목, 거래처 데이터를 자동으로 불러옵니다.</p>
+    <div id="fileDropZone" style="border:2px dashed var(--border);border-radius:6px;padding:2rem;text-align:center;cursor:pointer;transition:.2s;margin-bottom:1rem"
+         onclick="document.getElementById('excelFileInput').click()"
+         ondragover="event.preventDefault();this.style.borderColor='var(--blue)';this.style.background='var(--blue-lt)'"
+         ondragleave="this.style.borderColor='';this.style.background=''"
+         ondrop="handleFileDrop(event)">
+      <div style="font-size:2rem;margin-bottom:.5rem">📂</div>
+      <div id="fileDropLabel" style="font-size:.9rem;color:var(--gray)">클릭하거나 파일을 드래그하세요</div>
+      <div style="font-size:.75rem;color:var(--gray);margin-top:.25rem">.xlsx 파일</div>
+    </div>
+    <input type="file" id="excelFileInput" accept=".xlsx,.xls" style="display:none" onchange="handleFileSelect(this.files[0])">
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeImportModal()">취소</button>
+      <button class="btn-excel" id="importBtn" onclick="importExcel()" disabled>📥 데이터 가져오기</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Loader ── -->
+<div class="loader" id="loaderSection">
+  <div class="steps-progress">
+    <div class="prog-step" id="ps1">🔍 Searching website</div>
+    <div class="prog-step" id="ps2">📄 Reading content</div>
+    <div class="prog-step" id="ps3">🤖 AI analysis</div>
+    <div class="prog-step" id="ps4">📦 Building config</div>
+  </div>
+  <div class="spinner"></div>
+  <p id="loaderMsg" style="color:var(--gray);font-size:.9rem">Locating official website…</p>
+</div>
+
+<!-- ── Result Banner ── -->
+<div class="result-banner" id="resultBanner">
+  <div class="icon" id="bannerIcon">🏭</div>
+  <div>
+    <h3 id="bannerName">Company Name</h3>
+    <p id="bannerIndustry">Industry</p>
+    <div class="meta-chips" id="bannerChips"></div>
+  </div>
+</div>
+
+<!-- ── Pipeline ── -->
+<div id="pipeline-area">
+  <div class="pipeline-bar">
+    <div class="p-step active" id="nav1" onclick="goStep(1)"><span class="n">1</span> Customers</div>
+    <div class="p-step" id="nav2" onclick="goStep(2)"><span class="n">2</span> Products</div>
+    <div class="p-step" id="nav3" onclick="goStep(3)"><span class="n">3</span> Locations</div>
+    <div class="p-step" id="nav4" onclick="goStep(4)"><span class="n">4</span> Generate</div>
+  </div>
+
+  <div class="main">
+
+    <!-- Step 1: Customers -->
+    <div class="step-panel active" id="step1">
+      <div class="card">
+        <div class="card-title">Customer Records</div>
+        <div class="card-sub">AI has detected the following markets. Each becomes a CUSTOMER master record in IBP. Edit or add/remove as needed.</div>
+        <div class="cust-list" id="custList"></div>
+        <button class="btn-add-cust" onclick="addCustomer()">+ Add Customer</button>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="goStep(2)">Next: Products →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Products -->
+    <div class="step-panel" id="step2">
+      <div class="card">
+        <div class="card-title">Product Families</div>
+        <div class="card-sub">제품군을 선택하고 ✎ 버튼으로 개별 품목 코드를 편집하세요.</div>
+        <div class="product-grid" id="productGrid"></div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="goStep(1)">← Back</button>
+          <button class="btn btn-primary" onclick="goStep(3)">Next: Locations →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Locations -->
+    <div class="step-panel" id="step3">
+      <div class="card">
+        <div class="card-title">Plants &amp; Distribution Centers</div>
+        <div class="card-sub">✏ 아이콘을 클릭해 로케이션 정보를 편집하세요.</div>
+        <div class="section-label">Plants 🏭</div>
+        <div class="loc-grid" id="plantGrid"></div>
+        <div class="section-label">Distribution Centers 🏢</div>
+        <div class="loc-grid" id="dcGrid"></div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="goStep(2)">← Back</button>
+          <button class="btn btn-primary" onclick="buildPreview();goStep(4)">Next: Generate →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4: Generate -->
+    <div class="step-panel" id="step4">
+      <div class="card">
+        <div class="card-title">Review &amp; Download</div>
+        <div class="card-sub">All IBP-ready files are generated. Download the ZIP and import directly into SAP IBP.</div>
+        <div class="summary-grid" id="summaryGrid"></div>
+        <div class="alert alert-success" id="readyAlert" style="display:none">✓ Files ready. Download the ZIP and import into SAP IBP (Master Data first, then KF Data).</div>
+        <div class="preview-title">Files included</div>
+        <div class="file-list" id="fileList"></div>
+        <div id="previewContent"></div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="goStep(3)">← Back</button>
+          <button class="btn btn-success" onclick="downloadZip()">⬇ Download IBP ZIP</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- .main -->
+</div><!-- #pipeline-area -->
+
+<script>
+// ─── State ──────────────────────────────────────────────────────────────────
+const S = {
+  company: null,       // full analysis result from backend
+  customers: [],       // editable customer list
+  selectedProducts: new Set(),
+  selectedLocations: new Set(),
+  currentStep: 1,
+};
+
+// ─── Country helpers ─────────────────────────────────────────────────────────
+const COUNTRY_INFO = {
+  AD:{region:'EMEA',lat:42.5,lon:1.5},AE:{region:'EMEA',lat:24.4,lon:54.4},
+  AR:{region:'AMERICAS',lat:-34.6,lon:-58.4},AT:{region:'EMEA',lat:48.2,lon:16.4},
+  AU:{region:'APJ',lat:-33.9,lon:151.2},BE:{region:'EMEA',lat:50.8,lon:4.4},
+  BR:{region:'AMERICAS',lat:-23.5,lon:-46.6},CA:{region:'AMERICAS',lat:43.7,lon:-79.4},
+  CH:{region:'EMEA',lat:47.4,lon:8.5},CL:{region:'AMERICAS',lat:-33.5,lon:-70.7},
+  CN:{region:'APJ',lat:31.2,lon:121.5},CZ:{region:'EMEA',lat:50.1,lon:14.4},
+  DE:{region:'EMEA',lat:50.1,lon:8.7},DK:{region:'EMEA',lat:55.7,lon:12.6},
+  EG:{region:'EMEA',lat:30.1,lon:31.2},ES:{region:'EMEA',lat:40.4,lon:-3.7},
+  FI:{region:'EMEA',lat:60.2,lon:25.0},FR:{region:'EMEA',lat:48.9,lon:2.3},
+  GB:{region:'EMEA',lat:51.5,lon:-0.1},GR:{region:'EMEA',lat:37.9,lon:23.7},
+  HK:{region:'APJ',lat:22.3,lon:114.2},HU:{region:'EMEA',lat:47.5,lon:19.1},
+  ID:{region:'APJ',lat:-6.2,lon:106.8},IN:{region:'APJ',lat:12.97,lon:77.59},
+  IT:{region:'EMEA',lat:41.9,lon:12.5},JP:{region:'APJ',lat:35.7,lon:139.7},
+  KR:{region:'APJ',lat:37.6,lon:126.9},MX:{region:'AMERICAS',lat:19.4,lon:-99.1},
+  MY:{region:'APJ',lat:3.1,lon:101.7},NL:{region:'EMEA',lat:52.4,lon:4.9},
+  NO:{region:'EMEA',lat:59.9,lon:10.7},NZ:{region:'APJ',lat:-36.9,lon:174.8},
+  PH:{region:'APJ',lat:14.6,lon:121.0},PL:{region:'EMEA',lat:52.2,lon:21.0},
+  PT:{region:'EMEA',lat:38.7,lon:-9.1},RU:{region:'EMEA',lat:55.8,lon:37.6},
+  SA:{region:'EMEA',lat:24.7,lon:46.7},SE:{region:'EMEA',lat:59.3,lon:18.1},
+  SG:{region:'APJ',lat:1.3,lon:103.8},TH:{region:'APJ',lat:13.8,lon:100.5},
+  TR:{region:'EMEA',lat:39.9,lon:32.9},TW:{region:'APJ',lat:25.0,lon:121.5},
+  US:{region:'AMERICAS',lat:33.7,lon:-84.4},VN:{region:'APJ',lat:21.0,lon:105.8},
+  ZA:{region:'EMEA',lat:-26.2,lon:28.0},
+};
+function countryRegion(cc){ return (COUNTRY_INFO[cc]||{region:'EMEA'}).region; }
+function countryLat(cc){ return (COUNTRY_INFO[cc]||{lat:0}).lat; }
+function countryLon(cc){ return (COUNTRY_INFO[cc]||{lon:0}).lon; }
+
+// ─── Excel Import ─────────────────────────────────────────────────────────────
+function showImportModal() {
+  document.getElementById('excelFileInput').value = '';
+  document.getElementById('fileDropLabel').textContent = '클릭하거나 파일을 드래그하세요';
+  document.getElementById('fileDropLabel').style.color = '';
+  document.getElementById('importBtn').disabled = true;
+  document.getElementById('importModal').classList.add('active');
+}
+function closeImportModal() { document.getElementById('importModal').classList.remove('active'); }
+
+function handleFileSelect(file) {
+  if (!file) return;
+  const label = document.getElementById('fileDropLabel');
+  label.textContent = '✅ ' + file.name;
+  label.style.color = 'var(--green, #16a34a)';
+  document.getElementById('importBtn').disabled = false;
+}
+
+function handleFileDrop(e) {
+  e.preventDefault();
+  const zone = document.getElementById('fileDropZone');
+  zone.style.borderColor = '';
+  zone.style.background = '';
+  const file = e.dataTransfer.files[0];
+  if (!file || !/\.(xlsx|xls)$/i.test(file.name)) {
+    alert('.xlsx 또는 .xls 파일을 선택해주세요.');
+    return;
+  }
+  const input = document.getElementById('excelFileInput');
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  input.files = dt.files;
+  handleFileSelect(file);
+}
+
+async function importExcel() {
+  const input = document.getElementById('excelFileInput');
+  const file = input.files[0];
+  if (!file) { alert('파일을 선택해주세요.'); return; }
+  const btn = document.getElementById('importBtn');
+  btn.disabled = true; btn.textContent = '⏳ 읽는 중…';
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    try {
+      const bytes = new Uint8Array(ev.target.result);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const fileData = btoa(binary);
+      const res = await fetch('/api/import-excel', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileData, fileName: file.name }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error); }
+      const data = await res.json();
+      closeImportModal();
+      populateFromAnalysis(data);
+    } catch (e) {
+      alert('Excel 가져오기 실패: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = '📥 데이터 가져오기';
+    }
+  };
+  reader.onerror = () => {
+    alert('파일 읽기 실패.');
+    btn.disabled = false; btn.textContent = '📥 데이터 가져오기';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ─── Analyze flow ─────────────────────────────────────────────────────────────
+async function analyze() {
+  const name = document.getElementById('companyInput').value.trim();
+  if (!name) return;
+  document.getElementById('analyzeBtn').disabled = true;
+  document.getElementById('loaderSection').classList.add('active');
+  document.getElementById('pipeline-area').classList.remove('active');
+  document.getElementById('resultBanner').classList.remove('active');
+
+  const steps = [
+    { id:'ps1', msg:'Locating official website…' },
+    { id:'ps2', msg:'Reading company pages…' },
+    { id:'ps3', msg:'AI analyzing products & locations…' },
+    { id:'ps4', msg:'Building IBP configuration…' },
+  ];
+  let si = 0;
+  const tick = setInterval(() => {
+    if (si > 0) steps[si-1].id && (document.getElementById(steps[si-1].id).className='prog-step done');
+    if (si < steps.length) {
+      document.getElementById(steps[si].id).className='prog-step active';
+      document.getElementById('loaderMsg').textContent = steps[si].msg;
+      si++;
+    }
+  }, 1800);
+
+  try {
+    const res = await fetch('/api/analyze', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ company: name }),
+    });
+    clearInterval(tick);
+    steps.forEach(s => document.getElementById(s.id).className='prog-step done');
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Server error');
+    }
+    const data = await res.json();
+    populateFromAnalysis(data);
+  } catch (e) {
+    clearInterval(tick);
+    alert('Analysis failed: ' + e.message + '\n\nCheck that the server is running and ANTHROPIC_API_KEY is set.');
+    document.getElementById('analyzeBtn').disabled = false;
+  } finally {
+    document.getElementById('loaderSection').classList.remove('active');
+  }
+}
+
+function populateFromAnalysis(data) {
+  S.company = data;
+
+  // Banner
+  const banner = document.getElementById('resultBanner');
+  banner.classList.add('active');
+  document.getElementById('bannerName').textContent = data.company?.name || 'Company';
+  document.getElementById('bannerIndustry').textContent = data.company?.industry || '';
+  document.getElementById('bannerChips').innerHTML = [
+    `<span class="chip blue">HQ: ${data.company?.hq?.city}, ${data.company?.hq?.country}</span>`,
+    `<span class="chip">${(data.productFamilies||[]).length} Product Families</span>`,
+    `<span class="chip">${(data.locations||[]).length} Locations</span>`,
+    `<span class="chip">${(data.customers||[]).length} Customer Markets</span>`,
+    data._importedFromExcel ? `<span class="chip" style="background:#e6f4ea;color:#107e3e;border-color:#107e3e">📊 Excel Import</span>` : '',
+    data._meta?.officialUrl ? `<span class="chip">🌐 ${new URL(data._meta.officialUrl).hostname}</span>` : '',
+  ].filter(Boolean).join('');
+
+  // Customers — preserve custId if provided (Excel import)
+  S.customers = (data.customers || []).map((c, i) => ({
+    _id: i,
+    custId: c.custId || '',
+    country: c.country || 'KR',
+    region: c.region || countryRegion(c.country),
+    channel: c.channel || 'Direct',
+    group: c.group || 'Industry',
+    descr: c.custdescr || c.descr || `${c.country} Customer ${i+1}`,
+    recommendedFamilies: c.recommendedFamilies || [],
+  }));
+  renderCustomerList();
+
+  // Products
+  S.selectedProducts = new Set((data.productFamilies||[]).map(f => f.id));
+  renderProductGrid();
+
+  // Locations
+  S.selectedLocations = new Set((data.locations||[]).map(l => l.id));
+  renderLocationGrids();
+
+  // Show pipeline
+  goStep(1);
+  document.getElementById('pipeline-area').classList.add('active');
+  document.getElementById('analyzeBtn').disabled = false;
+}
+
+// ─── Customer list (Step 1) ────────────────────────────────────────────────────
+const CHANNELS = ['Direct','Indirect','Online'];
+const GROUPS = ['Retail','Wholesale','Industry','Trading','PrivateCustomer'];
+const REGIONS = ['EMEA','AMERICAS','APJ'];
+
+function renderCustomerList() {
+  document.getElementById('custList').innerHTML = S.customers.map((c, idx) => `
+    <div class="cust-item">
+      <div class="cust-num">${idx+1}</div>
+      <div class="cust-item-fields">
+        <div class="form-group">
+          <label>Customer ID <span style="font-size:.7rem;color:var(--gray)">(CUSTID)</span></label>
+          <input value="${esc(c.custId || genCustId(c.country, idx))}" placeholder="Auto" oninput="S.customers[${idx}].custId=this.value" style="font-family:monospace">
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <input value="${esc(c.descr)}" oninput="S.customers[${idx}].descr=this.value">
+        </div>
+        <div class="form-group">
+          <label>Country</label>
+          <input value="${esc(c.country)}" maxlength="2" style="text-transform:uppercase" oninput="S.customers[${idx}].country=this.value.toUpperCase()">
+        </div>
+        <div class="form-group">
+          <label>Region</label>
+          <select onchange="S.customers[${idx}].region=this.value">
+            ${REGIONS.map(r=>`<option ${c.region===r?'selected':''}>${r}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Channel</label>
+          <select onchange="S.customers[${idx}].channel=this.value">
+            ${CHANNELS.map(r=>`<option ${c.channel===r?'selected':''}>${r}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Group</label>
+          <select onchange="S.customers[${idx}].group=this.value">
+            ${GROUPS.map(r=>`<option ${c.group===r?'selected':''}>${r}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <button class="cust-remove" onclick="removeCustomer(${idx})" title="Remove">×</button>
+    </div>
+  `).join('');
+}
+
+function genCustId(country, seq) {
+  const info = COUNTRY_INFO[country] || {};
+  // Use country code digits from lat/lon approximation or just country hash
+  const hash = Array.from(country).reduce((a,c)=>a+c.charCodeAt(0),0) % 90 + 10;
+  const s = String(seq + 1).padStart(5,'0');
+  return `00${hash}1${s}`;
+}
+
+function addCustomer() {
+  S.customers.push({ _id: Date.now(), country:'US', region:'AMERICAS', channel:'Direct', group:'Industry', descr:'New Customer', recommendedFamilies:[] });
+  renderCustomerList();
+}
+function removeCustomer(idx) {
+  S.customers.splice(idx, 1);
+  renderCustomerList();
+}
+
+// ─── Product grid (Step 2) ─────────────────────────────────────────────────────
+function renderProductGrid() {
+  const fams = (S.company?.productFamilies || []);
+  document.getElementById('productGrid').innerHTML = fams.map(f => {
+    const sel = S.selectedProducts.has(f.id);
+    const editId = `pf-edit-${f.id}`;
+    return `<div class="product-card ${sel?'selected':''}" style="cursor:default">
+      <div style="cursor:pointer" onclick="toggleProduct('${f.id}')">
+        <div class="pf-family">${f.code}</div>
+        <div class="pf-name">${f.icon||'📦'} ${f.label}</div>
+        <div class="pf-meta">${(f.fg||[]).length} FG · ${(f.semi||[]).length} Semi · ${(f.raw||[]).length} Raw</div>
+      </div>
+      <button class="btn-pf-edit" onclick="togglePfEdit('${f.id}')">✎ 품목 편집</button>
+      <div class="pf-edit-panel" id="${editId}">
+        <table class="pf-items-table">
+          <thead><tr><th>품목 코드 (PRDID)</th><th>품목명 (PRDDESCR)</th><th>ABC</th><th></th></tr></thead>
+          <tbody id="pf-tbody-${f.id}">
+            ${(f.fg||[]).map((p,i)=>`<tr>
+              <td><input value="${esc(p.id)}" oninput="updatePrdItem('${f.id}',${i},'id',this.value)"></td>
+              <td><input value="${esc(p.desc||p.id)}" oninput="updatePrdItem('${f.id}',${i},'desc',this.value)" style="min-width:140px"></td>
+              <td><select onchange="updatePrdItem('${f.id}',${i},'abc',this.value)" style="width:60px">
+                ${['A','B','C',''].map(v=>`<option ${p.abc===v?'selected':''}>${v}</option>`).join('')}
+              </select></td>
+              <td><button class="btn-rm-item" onclick="removePrdItem('${f.id}',${i})" title="Remove">×</button></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        <button class="btn-add-item" onclick="addPrdItem('${f.id}')">+ 품목 추가</button>
+      </div>
+    </div>`;
+  }).join('') || '<p style="color:var(--gray)">No product families found.</p>';
+}
+function toggleProduct(id) {
+  if (S.selectedProducts.has(id)) S.selectedProducts.delete(id);
+  else S.selectedProducts.add(id);
+  renderProductGrid();
+}
+function togglePfEdit(famId) {
+  const el = document.getElementById(`pf-edit-${famId}`);
+  el.classList.toggle('open');
+}
+function updatePrdItem(famId, idx, field, val) {
+  const f = (S.company?.productFamilies||[]).find(x=>x.id===famId);
+  if (f && f.fg[idx]) f.fg[idx][field] = val;
+}
+function addPrdItem(famId) {
+  const f = (S.company?.productFamilies||[]).find(x=>x.id===famId);
+  if (!f) return;
+  f.fg = f.fg || [];
+  f.fg.push({ id: `${famId}-${f.fg.length+1}00`, desc: '신규 품목', abc: 'A', plm: 'EXISTING' });
+  renderProductGrid();
+  const el = document.getElementById(`pf-edit-${famId}`);
+  if (el) el.classList.add('open');
+}
+function removePrdItem(famId, idx) {
+  const f = (S.company?.productFamilies||[]).find(x=>x.id===famId);
+  if (f && f.fg) { f.fg.splice(idx, 1); renderProductGrid(); }
+  const el = document.getElementById(`pf-edit-${famId}`);
+  if (el) el.classList.add('open');
+}
+
+// ─── Location grids (Step 3) ───────────────────────────────────────────────────
+function renderLocationGrids() {
+  const locs = (S.company?.locations || []);
+  const plants = locs.filter(l => l.locType === 'P' || l.locType === 'Plant');
+  const dcs    = locs.filter(l => l.locType !== 'P' && l.locType !== 'Plant');
+  document.getElementById('plantGrid').innerHTML = renderLocCards(plants);
+  document.getElementById('dcGrid').innerHTML    = renderLocCards(dcs) || '<p style="color:var(--gray);font-size:.85rem">No DCs identified.</p>';
+}
+function renderLocCards(locs) {
+  return locs.map((l, gi) => {
+    const sel  = S.selectedLocations.has(l.id);
+    const icon = (l.locType==='P'||l.locType==='Plant') ? '🏭' : '🏢';
+    const idx  = (S.company?.locations||[]).indexOf(l);
+    return `<div class="loc-card-wrap ${sel?'selected':''}">
+      <div class="loc-card" style="border:none;border-radius:0;cursor:default" onclick="toggleLoc('${esc(l.id)}')">
+        <div class="loc-icon" style="cursor:pointer">${icon}</div>
+        <div style="flex:1;cursor:pointer">
+          <div class="loc-id">${esc(l.id)}</div>
+          <div class="loc-desc">${esc(l.desc)}</div>
+          <div class="loc-region">${esc(l.country||'')} · ${esc(l.region||'')}</div>
+        </div>
+        <span class="loc-edit-icon" onclick="event.stopPropagation();toggleLocEdit(${idx})" title="Edit">✏</span>
+      </div>
+      <div class="loc-edit-row" id="loc-edit-${idx}">
+        <div class="loc-edit-grid">
+          <div><label>Location ID</label><input value="${esc(l.id)}" oninput="updateLoc(${idx},'id',this.value)"></div>
+          <div><label>Description</label><input value="${esc(l.desc)}" oninput="updateLoc(${idx},'desc',this.value)"></div>
+          <div><label>City</label><input value="${esc(l.city||'')}" oninput="updateLoc(${idx},'city',this.value)"></div>
+          <div><label>Country (ISO2)</label><input value="${esc(l.country||'')}" maxlength="2" oninput="updateLoc(${idx},'country',this.value.toUpperCase())"></div>
+          <div><label>Region</label><select onchange="updateLoc(${idx},'region',this.value)">
+            ${REGIONS.map(r=>`<option ${l.region===r?'selected':''}>${r}</option>`).join('')}
+          </select></div>
+          <div><label>Type</label><select onchange="updateLoc(${idx},'locType',this.value)">
+            <option ${(l.locType==='P'||!l.locType)?'selected':''} value="P">P — Plant</option>
+            <option ${l.locType==='D'?'selected':''} value="D">D — DC</option>
+          </select></div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function toggleLoc(id) {
+  if (S.selectedLocations.has(id)) S.selectedLocations.delete(id);
+  else S.selectedLocations.add(id);
+  renderLocationGrids();
+}
+function toggleLocEdit(idx) {
+  const el = document.getElementById(`loc-edit-${idx}`);
+  if (el) el.classList.toggle('open');
+}
+function updateLoc(idx, field, val) {
+  const locs = S.company?.locations;
+  if (locs && locs[idx]) {
+    const oldId = locs[idx].id;
+    locs[idx][field] = val;
+    if (field === 'id' && S.selectedLocations.has(oldId)) {
+      S.selectedLocations.delete(oldId);
+      S.selectedLocations.add(val);
+    }
+  }
+}
+
+// ─── Step navigation ───────────────────────────────────────────────────────────
+function goStep(n) {
+  for (let i=1;i<=4;i++) {
+    document.getElementById(`step${i}`).classList.toggle('active', i===n);
+    const nav = document.getElementById(`nav${i}`);
+    nav.className='p-step' + (i===n?' active': i<n?' done':'');
+  }
+  S.currentStep = n;
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+// ─── CSV Generation ───────────────────────────────────────────────────────────
+function getSelectedFamilies() {
+  return (S.company?.productFamilies||[]).filter(f => S.selectedProducts.has(f.id));
+}
+function getAllFgProducts() {
+  return getSelectedFamilies().flatMap(f => (f.fg||[]).map(p=>({...p,family:f.code,brand:f.brand,group:f.group,uomId:'PC',uomDesc:'PIECE'})));
+}
+function getAllProducts() {
+  return getSelectedFamilies().flatMap(f => [
+    ...(f.fg||[]).map(p=>({...p,mattypeid:'FERT',family:f.code,brand:f.brand,group:f.group})),
+    ...(f.semi||[]).map(p=>({...p,mattypeid:'HALB',family:f.code,brand:f.brand,group:f.group})),
+    ...(f.raw||[]).map(p=>({...p,mattypeid:'ROH',family:f.code,brand:f.brand,group:f.group})),
+  ]);
+}
+function getSelectedLocationObjs() {
+  return (S.company?.locations||[]).filter(l => S.selectedLocations.has(l.id));
+}
+
+function csv(header, rows) { return [header, ...rows].join('\n'); }
+
+function buildAllCustomersCSV() {
+  const h = 'CUSTID;CUSTCHANNEL;CUSTCOUNTRY;CUSTDESCR;CUSTGROUP;CUSTIDDISPLAY;CUSTREGION;GEOLATITUDE;GEOLONGITUDE';
+  return csv(h, S.customers.map((c,i) => {
+    const id = genCustId(c.country, i);
+    return `${id};${c.channel};${c.country};${c.descr};${c.group};${id.slice(2)};${c.region};${countryLat(c.country)||''};${countryLon(c.country)||''}`;
+  }));
+}
+
+function buildProductCSV() {
+  const h = 'PRDID;PRDDESCR;PRDFAMILY;PRDSUBFAMILY;BRAND;PRDGROUP;MATTYPEID;UOMDESCR;UOMID;ABCID;ABCLOCKED;PLMSTATUS;XYZID';
+  return csv(h, getAllProducts().map(p => {
+    const fam = (S.company?.productFamilies||[]).find(f=>[...(f.fg||[]),...(f.semi||[]),...(f.raw||[])].find(x=>x.id===p.id));
+    const subfam = (fam?.code||'').replace('FAMILY ','SUB-FAMILY ');
+    const abc=p.abc||''; const xlk=abc==='A'?'X':''; const xyz=p.mattypeid==='FERT'?'Z':'';
+    return `${p.id};${p.desc||p.id};${fam?.code||''};${subfam};${fam?.brand||''};${fam?.group||''};${p.mattypeid};PIECE;PC;${abc};${xlk};${p.plm||'EXISTING'};${xyz}`;
+  }));
+}
+
+function buildCustomerProductCSV() {
+  const h = 'PRDID;CUSTID;MARKETSEGMENT';
+  const rows = [];
+  S.customers.forEach((c,i) => {
+    const id = genCustId(c.country, i);
+    const fams = c.recommendedFamilies?.length ? c.recommendedFamilies : [...S.selectedProducts];
+    const prds = getSelectedFamilies().filter(f => fams.includes(f.id)).flatMap(f => (f.fg||[]));
+    prds.forEach(p => {
+      const famNum = (p.id.match(/\d+/)||['100'])[0].slice(0,3);
+      rows.push(`${p.id};${id};${famNum.padEnd(5,'0').slice(0,5)}`);
+    });
+  });
+  return csv(h, rows);
+}
+
+function buildLocationProductCSV() {
+  const h = 'PRDID;LOCID;PLANNER;PLUNITID;FOOTPRINTPERUNIT;STOCKINGNODETYPE';
+  const rows = [];
+  getAllProducts().filter(p=>p.mattypeid==='FERT'||p.mattypeid==='HALB').forEach(p => {
+    getSelectedLocationObjs().forEach(l => {
+      rows.push(`${p.id};${l.id};1;SPA;;`);
+    });
+  });
+  return csv(h, rows);
+}
+
+function buildSourceCustomerCSV() {
+  const h = 'PRDID;CUSTID;LOCID;CRATIO;CLEADTIME;RATIOTS;TIMESERIESPROPERTY;FCSTCONSMODE';
+  const rows = [];
+  getAllFgProducts().forEach(p => {
+    S.customers.forEach((c,i) => {
+      const id = genCustId(c.country, i);
+      getSelectedLocationObjs().filter(l => l.region === c.region).slice(0,1).forEach(l => {
+        rows.push(`${p.id};${id};${l.id};1;;;CONTINUOUS;105`);
+      });
+    });
+  });
+  return csv(h, rows);
+}
+
+function buildLocationCSV() {
+  const h = 'LOCID;LOCDESCR;LOCREGION;LOCIDDISPLAY;LOCTYPE;GEOLATITUDE;GEOLONGITUDE;EXTRISKRELEVANT';
+  return csv(h, getSelectedLocationObjs().map(l =>
+    `${l.id};${l.desc};${l.region};${l.id};P;${l.lat||''};${l.lon||''};X`
+  ));
+}
+
+function getDateRange(gran, n) {
+  const dates=[]; const d=new Date();
+  if(gran==='month') for(let i=0;i<n;i++){ dates.push(new Date(d.getFullYear(),d.getMonth()+i,1).toISOString().slice(0,10)); }
+  else { d.setDate(d.getDate()+(1+7-d.getDay())%7); for(let i=0;i<n;i++){ dates.push(d.toISOString().slice(0,10)); d.setDate(d.getDate()+7); } }
+  return dates;
+}
+
+function buildMthProdCustCSV() {
+  const h = 'PRDID;CUSTID;KEYFIGUREDATE;AOPQTY';
+  const rows = [];
+  const dates = getDateRange('month',12);
+  getAllFgProducts().forEach(p => {
+    S.customers.forEach((c,i) => {
+      const id = genCustId(c.country, i);
+      dates.forEach(d => rows.push(`${p.id};${id};${d};`));
+    });
+  });
+  return csv(h, rows);
+}
+
+function buildWkProdCustCSV() {
+  const h = 'PRDID;CUSTID;KEYFIGUREDATE;MARKETINGFORECASTQTY;NONDELIVERYCOSTRATE;OPPORTUNITIESQTY;CONSDEMLATEDELIVMAX;CONSDEMLATEDELIVCOSTRATE';
+  const rows = [];
+  const dates = getDateRange('week',52);
+  getAllFgProducts().forEach(p => {
+    S.customers.forEach((c,i) => {
+      const id = genCustId(c.country, i);
+      dates.forEach(d => rows.push(`${p.id};${id};${d};;;;;`));
+    });
+  });
+  return csv(h, rows);
+}
+
+function buildWkProdLocCustCSV() {
+  const h = 'PRDID;LOCID;CUSTID;KEYFIGUREDATE;ACTUALSQTY;CUSTOMERRATIO;CUSTOMERTRANSPORTATIONCOSTRATE;SALESFORECASTQTY;SOPDEMANDPLANNINGQTY;OPENORDERSQTY;CALEVENT';
+  const rows = [];
+  const dates = getDateRange('week',26);
+  getAllFgProducts().forEach(p => {
+    getSelectedLocationObjs().slice(0,3).forEach(l => {
+      S.customers.slice(0,3).forEach((c,i) => {
+        const id = genCustId(c.country, i);
+        dates.forEach(d => rows.push(`${p.id};${l.id};${id};${d};;1;;;;;`));
+      });
+    });
+  });
+  return csv(h, rows);
+}
+
+function buildWkProdLocCSV() {
+  const h = 'PRDID;LOCID;KEYFIGUREDATE;INITIALINVENTORY;INVENTORYHOLDINGCOSTRATE;EXTERNALRECEIPTCOSTRATE;INVENTORYTARGETVIOLATIONCOSTRATE;NAGCSTEXTERNALRECEIPTCOSTRATE;NAGCSTFIXEDEXTERNALRECEIPTCOST;NAGCSTINITIALAGGRUNITCOST;NAGCSTINVENTORYCOSTRATE;NAGCO2EXTERNALRECEIPTEMISRATE;NAGCO2FIXEDEXTERNALRECEIPTEMIS;NAGCO2INITIALAGGRUNITEMIS;NAGCO2INVENTORYEMISRATE';
+  const rows = [];
+  const dates = getDateRange('week',13);
+  getAllFgProducts().forEach(p => {
+    getSelectedLocationObjs().forEach(l => {
+      dates.forEach(d => rows.push(`${p.id};${l.id};${d};100;1;;1;;;9.5;1;;;0;1`));
+    });
+  });
+  return csv(h, rows);
+}
+
+// ─── File manifest (for display only — actual generation is server-side) ──────
+const MASTER_FILES = [
+  {label:'010_CUSTOMER',              type:'Master', desc:'Customer master records'},
+  {label:'020_LOCATION',              type:'Master', desc:'Plant & DC locations'},
+  {label:'030_PRODUCT',               type:'Master', desc:'FG / Semi / Raw products'},
+  {label:'040_RESOURCE',              type:'Master', desc:'Production resources per location'},
+  {label:'060_LAG',                   type:'Master', desc:'Lag definitions (BP ref)'},
+  {label:'070_SERVICELEVELCLASS',     type:'Master', desc:'ABC service levels (BP ref)'},
+  {label:'080_CURRENCY',              type:'Master', desc:'Currency list (BP ref)'},
+  {label:'090_UOMTO',                 type:'Master', desc:'Unit of measure list (BP ref)'},
+  {label:'100_UOMCONVERSIONFACTOR',   type:'Master', desc:'UOM conversions per product'},
+  {label:'105_EXCHANGE_RATE',         type:'Master', desc:'Exchange rates (BP ref)'},
+  {label:'110_CUSTOMERPRODUCT',       type:'Master', desc:'Customer–product assignments'},
+  {label:'120_LOCATIONPRODUCT',       type:'Master', desc:'Location–product planning data'},
+  {label:'130_RESOURCELOCATION',      type:'Master', desc:'Resource–location assignments'},
+  {label:'140_SOURCECUSTOMER',        type:'Master', desc:'Customer sourcing network'},
+  {label:'150_SOURCELOCATION',        type:'Master', desc:'DC→Plant sourcing network'},
+  {label:'160_SOURCEPRODUCTIONHEADER',type:'Master', desc:'Production source headers'},
+  {label:'170_PRODUCTIONSOURCEITM',   type:'Master', desc:'Production BOM items'},
+  {label:'180_PRODUCTIONSOURCERESOURCE',type:'Master',desc:'Production resource links'},
+  {label:'190_SOURCECUSTGROUP',       type:'Master', desc:'Customer group demand stream'},
+  {label:'220_FORECASTCONSUMPTIONMODE',type:'Master',desc:'Forecast consumption modes (BP ref)'},
+  {label:'240_DSFULFILLMENT',         type:'Master', desc:'DS fulfillment days (BP ref)'},
+  {label:'280_INTERVAL',              type:'Master', desc:'Lead time intervals (BP ref)'},
+];
+const KF_FILES = [
+  {label:'MTHPRODCUST',         type:'KF', desc:'Monthly AOP qty (seeded from BP)'},
+  {label:'MTHPRODCUSTCURR',     type:'KF', desc:'Monthly AOP revenue & profit'},
+  {label:'WKPRODLOC',           type:'KF', desc:'Weekly inventory & cost rates'},
+  {label:'WKPRODLOCSRC',        type:'KF', desc:'Weekly production cost rates'},
+  {label:'WKPRODLOCCUST',       type:'KF', desc:'Weekly actuals + sales forecast'},
+  {label:'WKPRODLOCCUSTGROUP',  type:'KF', desc:'Weekly IO forecast by customer group'},
+  {label:'WKPRODLOCCUSTCURR',   type:'KF', desc:'Weekly actuals & open orders revenue'},
+  {label:'WKPRODLOCLOCTO',      type:'KF', desc:'Transportation cost rates Plant→DC'},
+  {label:'WKRESLOC',            type:'KF', desc:'Weekly resource capacity supply'},
+  {label:'WKRESPRODLOCSRC',     type:'KF', desc:'Weekly capacity consumption per product'},
+  {label:'WKPRODCUSTCURR',      type:'KF', desc:'Weekly planned price per customer'},
+  {label:'WKPRODLOCCURR',       type:'KF', desc:'Weekly cost per unit at location'},
+  {label:'WKPRODFMLLOCRGN',     type:'KF', desc:'Family/region inventory budget flag'},
+  {label:'DAYPRODLOCCUST',      type:'KF', desc:'Historical weekly delivery quantities'},
+];
+const ALL_FILES = [...MASTER_FILES, ...KF_FILES];
+
+// ─── Preview ─────────────────────────────────────────────────────────────────
+function buildPreview() {
+  const fgs = getAllFgProducts();
+  const locs = getSelectedLocationObjs();
+  const totalProds = (S.company?.productFamilies||[])
+    .filter(f=>S.selectedProducts.has(f.id))
+    .reduce((a,f)=>(a+(f.fg||[]).length+(f.semi||[]).length+(f.raw||[]).length),0);
+
+  document.getElementById('summaryGrid').innerHTML = [
+    {val:S.customers.length,  lbl:'Customer Records'},
+    {val:fgs.length,          lbl:'FG Products'},
+    {val:locs.length,         lbl:'Locations'},
+    {val:ALL_FILES.length,    lbl:'Files Generated'},
+  ].map(t=>`<div class="summary-tile"><div class="val">${t.val}</div><div class="lbl">${t.lbl}</div></div>`).join('');
+
+  document.getElementById('fileList').innerHTML = ALL_FILES.map(f=>
+    `<div class="file-chip" title="${esc(f.desc)}"><span class="type">${f.type}</span>${f.label}</div>`
+  ).join('');
+
+  // Show customer preview table
+  document.getElementById('previewContent').innerHTML = `
+    <div class="preview-title">010_CUSTOMER_NEW.CSV — Preview</div>
+    <div style="overflow-x:auto"><table class="preview-table">
+      <tr><th>CUSTID</th><th>CUSTCOUNTRY</th><th>CUSTDESCR</th><th>CUSTGROUP</th><th>CUSTREGION</th><th>CUSTCHANNEL</th></tr>
+      ${S.customers.map((c,i)=>`<tr>
+        <td>${esc(c.custId || genCustId(c.country,i))}</td>
+        <td>${esc(c.country)}</td><td>${esc(c.descr)}</td>
+        <td>${esc(c.group)}</td><td>${esc(c.region)}</td><td>${esc(c.channel)}</td>
+      </tr>`).join('')}
+    </table></div>
+    <div class="preview-title">030_PRODUCT_NEW.CSV — FG Products preview</div>
+    <div style="overflow-x:auto"><table class="preview-table">
+      <tr><th>PRDID</th><th>PRDDESCR</th><th>PRDFAMILY</th><th>MATTYPEID</th><th>ABCID</th></tr>
+      ${getAllFgProducts().map(p=>`<tr>
+        <td>${esc(p.id)}</td><td>${esc(p.desc||p.id)}</td>
+        <td>${esc(p.family||'')}</td><td>FERT</td><td>${esc(p.abc||'')}</td>
+      </tr>`).join('')}
+    </table></div>
+    <div class="alert alert-info" style="margin-top:1rem">
+      📊 KF seed values: Monthly AOP ~${bpSeeds?.mthAop?.[0]||'—'} units, Wk Inventory ${bpSeeds?.wkInitialInventory||'—'}, Production cost rate ${bpSeeds?.wkProductionCostRate||'—'} — based on IBP BP 2608 reference data.
+    </div>`;
+
+  document.getElementById('readyAlert').style.display='block';
+}
+
+// ─── Server-side Download ──────────────────────────────────────────────────────
+let bpSeeds = null;
+
+async function loadSeeds() {
+  try {
+    const r = await fetch('/api/seeds');
+    const d = await r.json();
+    bpSeeds = d.seeds;
+  } catch {}
+}
+
+async function downloadZip() {
+  if (!S.company) { alert('Please analyze a company first.'); return; }
+
+  const dlBtn = document.querySelector('.btn-success');
+  dlBtn.disabled = true;
+  dlBtn.textContent = '⏳ Generating…';
+
+  try {
+    const payload = {
+      analysis: S.company,
+      selections: {
+        customers: S.customers.map((c, i) => ({
+          ...c,
+          custId: c.custId || genCustId(c.country, i),
+        })),
+        selectedFamilyIds: [...S.selectedProducts],
+        selectedLocationIds: [...S.selectedLocations],
+      },
+    };
+
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err);
+    }
+
+    const blob = await res.blob();
+    const name = (S.company.company?.name || 'IBP').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `IBP_${name}_${new Date().toISOString().slice(0, 10)}.zip`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) {
+    alert('Generation failed: ' + e.message);
+  } finally {
+    dlBtn.disabled = false;
+    dlBtn.textContent = '⬇ Download IBP ZIP';
+  }
+}
+
+// Load seeds on startup
+loadSeeds();
+
+// ─── Util ─────────────────────────────────────────────────────────────────────
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+</script>
+</body>
+</html>
