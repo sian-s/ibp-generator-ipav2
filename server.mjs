@@ -243,14 +243,30 @@ function gen030Product(families) {
   return csv(h, rows);
 }
 
+// Valid RESTYPE string values for the CAPASUPPLY formula.
+// WARNING: numeric values like "1" fall through to the production branch — never use them.
+const VALID_RESTYPES = new Set(['ASSEMBLY', 'PACK', 'SUBASSEMBLY', 'STORAGE', 'TRANSPORT', 'HANDLING']);
+
+function validateResType(resType) {
+  if (!VALID_RESTYPES.has(resType)) {
+    throw new Error(
+      `Invalid RESTYPE "${resType}". Must be one of: ${[...VALID_RESTYPES].join(', ')}. ` +
+      `Numeric values (e.g. "1") are not valid — they silently fall through to the production formula.`
+    );
+  }
+  return resType;
+}
+
 function gen040Resource(locs, routing) {
-  const h = 'RESID,RESDESCR';
+  const h = 'RESID,RESDESCR,RESTYPE';
   const rows = [];
   for (const l of locs) {
     rows.push(
-      `${l.id} ASSEMBLY,${l.desc} Assembly`,
-      `${l.id} PACK,${l.desc} Pack`,
-      `${l.id} SUBASSEMBLY,${l.desc} Subassembly`,
+      `${l.id} ASSEMBLY,${l.desc} Assembly,${validateResType('ASSEMBLY')}`,
+      `${l.id} PACK,${l.desc} Pack,${validateResType('PACK')}`,
+      `${l.id} SUBASSEMBLY,${l.desc} Subassembly,${validateResType('SUBASSEMBLY')}`,
+      `${l.id} STORAGE,${l.desc} Storage,${validateResType('STORAGE')}`,
+      `${l.id} TRANSPORT,${l.desc} Transport,${validateResType('TRANSPORT')}`,
     );
   }
   return csv(h, rows);
@@ -308,6 +324,8 @@ function gen130ResourceLocation(locs, resources, routing) {
       [l.id, `${l.id} ASSEMBLY`,    '', '', '', '', 'F', '', ''].join(','),
       [l.id, `${l.id} PACK`,        '', '', '', '', 'F', '', ''].join(','),
       [l.id, `${l.id} SUBASSEMBLY`, '', '', '', '', 'F', '', ''].join(','),
+      [l.id, `${l.id} STORAGE`,     '', '', '', '', 'F', '', ''].join(','),
+      [l.id, `${l.id} TRANSPORT`,   '', '', '', '', 'F', '', ''].join(','),
     );
   }
   return csv(h, rows);
@@ -713,14 +731,63 @@ function genWkProdLocLocTo(locs, families) {
 }
 
 function genWkResLoc(locs) {
-  // IPAV2 template: LOCID,KEYFIGUREDATE,RESID,CAPASUPPLY,...
-  const h = 'LOCID,KEYFIGUREDATE,RESID,CAPASUPPLY,ALRTCAPACITYOVERLOADTHRESHOLD';
+  // IPAV2 template — CAPASUPPLY is a calculated KF driven by the formula:
+  //   IF(RESTYPE="STORAGE",   ZSCAPASUPLYSTORAGE,
+  //   IF(RESTYPE="TRANSPORT", ZSCAPASUPLYTRANSPORT,
+  //   IF(RESTYPE="HANDLING",  ZSCAPASUPLYTRANSPORT,
+  //     ZSSHIFTNUM × ZSCAPAPERSHIFT × ZSEFFICIENCY × ZSRESOURCEWORKDAYS × ZSCAPAMULTIPLIER)))
+  // We populate only the input KFs; CAPASUPPLY is left empty for the system to compute.
+  const h = [
+    'LOCID', 'KEYFIGUREDATE', 'RESID',
+    'CAPASUPPLY', 'ALRTCAPACITYOVERLOADTHRESHOLD',
+    'ZSCAPASUPLYSTORAGE', 'ZSCAPASUPLYTRANSPORT',
+    'ZSSHIFTNUM', 'ZSCAPAPERSHIFT', 'ZSEFFICIENCY',
+    'ZSRESOURCEWORKDAYS', 'ZSCAPAMULTIPLIER',
+  ].join(',');
+
   const dates = weekDates(26);
   const rows = [];
+
+  // Production resource defaults (ASSEMBLY / PACK / SUBASSEMBLY)
+  const shiftNum     = 2;      // shifts per day
+  const capaPerShift = 8;      // hours per shift
+  const efficiency   = 0.85;   // 85%
+  const workDays     = 5;      // days per week
+  const multiplier   = 1;      // number of machines/lines
+
+  // Storage / Transport capacity defaults
+  const storageCapa   = 10000;  // e.g. pallet slots per week
+  const transportCapa = bpSeeds.wkCapaSupply || 3000;  // e.g. transport hours per week
+
   for (const l of locs) {
-    rows.push(...dates.map(d =>
-      `${l.id},${d},${l.id} ASSEMBLY,${bpSeeds.wkCapaSupply},1`
-    ));
+    // Production resources
+    for (const resType of ['ASSEMBLY', 'PACK', 'SUBASSEMBLY']) {
+      rows.push(...dates.map(d => [
+        l.id, d, `${l.id} ${resType}`,
+        '',  // CAPASUPPLY — computed by formula
+        1,
+        '', '',            // ZSCAPASUPLYSTORAGE, ZSCAPASUPLYTRANSPORT (not used)
+        shiftNum, capaPerShift, efficiency, workDays, multiplier,
+      ].join(',')));
+    }
+
+    // Storage resource
+    rows.push(...dates.map(d => [
+      l.id, d, `${l.id} STORAGE`,
+      '',  // CAPASUPPLY — computed by formula
+      1,
+      storageCapa, '',   // ZSCAPASUPLYSTORAGE
+      '', '', '', '', '', // production fields empty
+    ].join(',')));
+
+    // Transport resource
+    rows.push(...dates.map(d => [
+      l.id, d, `${l.id} TRANSPORT`,
+      '',  // CAPASUPPLY — computed by formula
+      1,
+      '', transportCapa, // ZSCAPASUPLYTRANSPORT
+      '', '', '', '', '', // production fields empty
+    ].join(',')));
   }
   return csv(h, rows);
 }
