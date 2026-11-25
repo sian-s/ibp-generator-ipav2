@@ -192,6 +192,7 @@ function jitter(base, pct = 0.15) {
 // ─── CSV generation helpers ───────────────────────────────────────────────────
 
 const csv = (header, rows) => rows.length ? 'sep=,\n' + header + '\n' + rows.join('\n') : null;
+const csvHeader = (header) => 'sep=,\n' + header + '\n';
 
 function sourceId(prdId, locId) {
   return `${prdId.padEnd(18)}${locId.padEnd(18)}S`;
@@ -267,6 +268,7 @@ function gen040Resource(locs, routing) {
       `${l.id} SUBASSEMBLY,${l.desc} Subassembly,${validateResType('SUBASSEMBLY')}`,
       `${l.id} STORAGE,${l.desc} Storage,${validateResType('STORAGE')}`,
       `${l.id} TRANSPORT,${l.desc} Transport,${validateResType('TRANSPORT')}`,
+      `${l.id} HANDLING,${l.desc} Handling,${validateResType('HANDLING')}`,
     );
   }
   return csv(h, rows);
@@ -326,6 +328,7 @@ function gen130ResourceLocation(locs, resources, routing) {
       [l.id, `${l.id} SUBASSEMBLY`, '', '', '', '', 'F', '', ''].join(','),
       [l.id, `${l.id} STORAGE`,     '', '', '', '', 'F', '', ''].join(','),
       [l.id, `${l.id} TRANSPORT`,   '', '', '', '', 'F', '', ''].join(','),
+      [l.id, `${l.id} HANDLING`,    '', '', '', '', 'F', '', ''].join(','),
     );
   }
   return csv(h, rows);
@@ -731,63 +734,75 @@ function genWkProdLocLocTo(locs, families) {
 }
 
 function genWkResLoc(locs) {
-  // IPAV2 template — CAPASUPPLY is a calculated KF driven by the formula:
-  //   IF(RESTYPE="STORAGE",   ZSCAPASUPLYSTORAGE,
-  //   IF(RESTYPE="TRANSPORT", ZSCAPASUPLYTRANSPORT,
-  //   IF(RESTYPE="HANDLING",  ZSCAPASUPLYTRANSPORT,
-  //     ZSSHIFTNUM × ZSCAPAPERSHIFT × ZSEFFICIENCY × ZSRESOURCEWORKDAYS × ZSCAPAMULTIPLIER)))
-  // We populate only the input KFs; CAPASUPPLY is left empty for the system to compute.
+  // Header matches IPAV2__WKRESLOC_TEMPLATE.csv exactly (27 columns).
+  // CAPASUPPLY is a calculated KF (driven by RESTYPE formula) — left blank for IBP to compute.
   const h = [
     'LOCID', 'KEYFIGUREDATE', 'RESID',
-    'CAPASUPPLY', 'ALRTCAPACITYOVERLOADTHRESHOLD',
-    'ZSCAPASUPLYSTORAGE', 'ZSCAPASUPLYTRANSPORT',
-    'ZSSHIFTNUM', 'ZSCAPAPERSHIFT', 'ZSEFFICIENCY',
-    'ZSRESOURCEWORKDAYS', 'ZSCAPAMULTIPLIER',
+    'ZSGDCAPASUPPLYEXPCOSTRATERESET', 'ZXCO2ACTIVITY', 'ZSCAPAUSAGESTORAGECOPY',
+    'ZSEXPANSIONSHIFTCOSTRATE', 'ZSREGULARSHIFTCOSTRATE', 'ZSEXTRARESOURCE', 'ZSMINCAPUTILRATE',
+    'ALRTCAPACITYOVERLOADTHRESHOLD', 'ZSCAPAPERSHIFT', 'ZSCAPASIGNAL',
+    'ZSCAPASUPPLYSTORAGE', 'ZSCAPASUPPLYTRANSPORT',
+    'ZSEFFICIENCY', 'ZSHANDLINGCAPACITY', 'ZSRESOURCE', 'ZSSHIFTEXTRA', 'ZSSHIFTNUMRESET',
+    'ZXWKRESLOCCAL', 'CAPASUPPLYEXPANSIONCOSTRATE', 'MINCAPAUSAGE', 'MINCAPAUSAGEVIOLCOSTRATE',
+    'ZSSHIFTNUM', 'CAPASUPPLY', 'ZSSHIFTHRS',
   ].join(',');
 
   const dates = weekDates(26);
   const rows = [];
 
-  // Production resource defaults (ASSEMBLY / PACK / SUBASSEMBLY)
-  const shiftNum     = 2;      // shifts per day
-  const capaPerShift = 8;      // hours per shift
-  const efficiency   = 0.85;   // 85%
-  const workDays     = 5;      // days per week
-  const multiplier   = 1;      // number of machines/lines
+  const shiftNum    = 2;     // shifts per day
+  const shiftHrs    = 8;     // hours per shift  → ZSCAPAPERSHIFT
+  const efficiency  = 0.85;  // 85%              → ZSEFFICIENCY
+  const resource    = 1;     // machines/lines   → ZSRESOURCE
+  const totalHrsWk  = shiftNum * shiftHrs * 5;  // 80 hrs/week → ZSSHIFTHRS
 
-  // Storage / Transport capacity defaults
-  const storageCapa   = 10000;  // e.g. pallet slots per week
-  const transportCapa = bpSeeds.wkCapaSupply || 3000;  // e.g. transport hours per week
+  const storageCapa   = 10000;
+  const transportCapa = bpSeeds.wkCapaSupply || 3000;
+
+  const mkRow = (locId, date, resId, o = {}) => {
+    const f = {
+      ZSGDCAPASUPPLYEXPCOSTRATERESET: '', ZXCO2ACTIVITY: '', ZSCAPAUSAGESTORAGECOPY: '',
+      ZSEXPANSIONSHIFTCOSTRATE: '', ZSREGULARSHIFTCOSTRATE: '', ZSEXTRARESOURCE: '',
+      ZSMINCAPUTILRATE: '', ALRTCAPACITYOVERLOADTHRESHOLD: 1,
+      ZSCAPAPERSHIFT: '', ZSCAPASIGNAL: '',
+      ZSCAPASUPPLYSTORAGE: '', ZSCAPASUPPLYTRANSPORT: '',
+      ZSEFFICIENCY: '', ZSHANDLINGCAPACITY: '', ZSRESOURCE: '',
+      ZSSHIFTEXTRA: '', ZSSHIFTNUMRESET: '', ZXWKRESLOCCAL: '',
+      CAPASUPPLYEXPANSIONCOSTRATE: '', MINCAPAUSAGE: '', MINCAPAUSAGEVIOLCOSTRATE: '',
+      ZSSHIFTNUM: '', CAPASUPPLY: '', ZSSHIFTHRS: '',
+      ...o,
+    };
+    return [
+      locId, date, resId,
+      f.ZSGDCAPASUPPLYEXPCOSTRATERESET, f.ZXCO2ACTIVITY, f.ZSCAPAUSAGESTORAGECOPY,
+      f.ZSEXPANSIONSHIFTCOSTRATE, f.ZSREGULARSHIFTCOSTRATE, f.ZSEXTRARESOURCE, f.ZSMINCAPUTILRATE,
+      f.ALRTCAPACITYOVERLOADTHRESHOLD, f.ZSCAPAPERSHIFT, f.ZSCAPASIGNAL,
+      f.ZSCAPASUPPLYSTORAGE, f.ZSCAPASUPPLYTRANSPORT,
+      f.ZSEFFICIENCY, f.ZSHANDLINGCAPACITY, f.ZSRESOURCE, f.ZSSHIFTEXTRA, f.ZSSHIFTNUMRESET,
+      f.ZXWKRESLOCCAL, f.CAPASUPPLYEXPANSIONCOSTRATE, f.MINCAPAUSAGE, f.MINCAPAUSAGEVIOLCOSTRATE,
+      f.ZSSHIFTNUM, f.CAPASUPPLY, f.ZSSHIFTHRS,
+    ].join(',');
+  };
 
   for (const l of locs) {
-    // Production resources
-    for (const resType of ['ASSEMBLY', 'PACK', 'SUBASSEMBLY']) {
-      rows.push(...dates.map(d => [
-        l.id, d, `${l.id} ${resType}`,
-        '',  // CAPASUPPLY — computed by formula
-        1,
-        '', '',            // ZSCAPASUPLYSTORAGE, ZSCAPASUPLYTRANSPORT (not used)
-        shiftNum, capaPerShift, efficiency, workDays, multiplier,
-      ].join(',')));
+    for (const rtype of ['ASSEMBLY', 'PACK', 'SUBASSEMBLY']) {
+      rows.push(...dates.map(d => mkRow(l.id, d, `${l.id} ${rtype}`, {
+        ZSCAPAPERSHIFT: shiftHrs,
+        ZSEFFICIENCY:   efficiency,
+        ZSRESOURCE:     resource,
+        ZSSHIFTNUM:     shiftNum,
+        ZSSHIFTHRS:     totalHrsWk,
+      })));
     }
-
-    // Storage resource
-    rows.push(...dates.map(d => [
-      l.id, d, `${l.id} STORAGE`,
-      '',  // CAPASUPPLY — computed by formula
-      1,
-      storageCapa, '',   // ZSCAPASUPLYSTORAGE
-      '', '', '', '', '', // production fields empty
-    ].join(',')));
-
-    // Transport resource
-    rows.push(...dates.map(d => [
-      l.id, d, `${l.id} TRANSPORT`,
-      '',  // CAPASUPPLY — computed by formula
-      1,
-      '', transportCapa, // ZSCAPASUPLYTRANSPORT
-      '', '', '', '', '', // production fields empty
-    ].join(',')));
+    rows.push(...dates.map(d => mkRow(l.id, d, `${l.id} STORAGE`, {
+      ZSCAPASUPPLYSTORAGE: storageCapa,
+    })));
+    rows.push(...dates.map(d => mkRow(l.id, d, `${l.id} TRANSPORT`, {
+      ZSCAPASUPPLYTRANSPORT: transportCapa,
+    })));
+    rows.push(...dates.map(d => mkRow(l.id, d, `${l.id} HANDLING`, {
+      ZSHANDLINGCAPACITY: transportCapa,
+    })));
   }
   return csv(h, rows);
 }
@@ -931,6 +946,118 @@ function genMthCostCenterCurr(customers) {
   return csv(h, rows);
 }
 
+// ── Missing-template generators (header-only or minimal data) ───────��──────────
+
+function genPlanningUnit() {
+  // CP1PLANNINGUNIT_TEMPLATE.csv
+  return csv('PLUNITID', ['IBP1']);
+}
+
+function genMthProdCustCurrKf(customers, families) {
+  // IPAV2__MTHPRODCUSTCURR_TEMPLATE.csv — inventory value segmentation KF
+  const h = 'PRDID,KEYFIGUREDATE,CUSTID,CURRID,ZXSEGINVVALUE';
+  const dates = monthDates(12);
+  const rows = [];
+  for (const f of families) {
+    for (const p of (f.fg || [])) {
+      for (const c of customers) {
+        const hasFam = !c.recommendedFamilies?.length || c.recommendedFamilies.includes(f.id);
+        if (!hasFam) continue;
+        for (const d of dates) {
+          rows.push(`${p.id},${d},${c.custId},USD,`);
+        }
+      }
+    }
+  }
+  return csv(h, rows);
+}
+
+function genMthProdLocsaCustCurr(customers, locs, families) {
+  // IPAV2__MTHPRODLOCSACUSTCURR_TEMPLATE.csv — monthly budget by location
+  const h = 'PRDID,LOCID,KEYFIGUREDATE,CUSTID,CURRID,SALESAREA,' +
+            'ZFBUDGETVCOPY,ZXBLANKMTHPRODLOCSACUSTCURR,ZXDISAGGREGATIONFACTORCURR,' +
+            'ZFBUDGETV,ZFTTSADDV,ZFTTSRATE';
+  const dates = monthDates(12);
+  const plants = locs.filter(l => l.locType === 'P' || l.locType === 'Plant');
+  const workLocs = plants.length ? plants : locs;
+  const rows = [];
+  for (const f of families) {
+    for (const p of (f.fg || [])) {
+      for (const l of workLocs) {
+        for (const c of customers) {
+          const hasFam = !c.recommendedFamilies?.length || c.recommendedFamilies.includes(f.id);
+          if (!hasFam) continue;
+          for (let i = 0; i < dates.length; i++) {
+            const budgetV = jitter(seedVal(bpSeeds.mthRev, i));
+            rows.push([p.id, l.id, dates[i], c.custId, 'USD', '', '', '', '', budgetV, '', ''].join(','));
+          }
+        }
+      }
+    }
+  }
+  return csv(h, rows);
+}
+
+function genMthProdLocsaCust(customers, locs, families) {
+  // IPAV2__MTHPRODLOCSACUST_TEMPLATE.csv — monthly TP/ML forecast by location
+  const h = 'PRDID,LOCID,KEYFIGUREDATE,CUSTID,SALESAREA,' +
+            'ZXBLANKMTHPRODLOCSACUST,ZXBTPMLFCSTQTY,ZXBTPMLFCSTQTYCOPY,' +
+            'ZXCBFACTUALSQTY,ZXCBFACTUALSQTYBACKUP,ZXCBMACTUALSQTYFIX,ZFBUDGETOVRQ';
+  const dates = monthDates(12);
+  const plants = locs.filter(l => l.locType === 'P' || l.locType === 'Plant');
+  const workLocs = plants.length ? plants : locs;
+  const rows = [];
+  for (const f of families) {
+    for (const p of (f.fg || [])) {
+      for (const l of workLocs) {
+        for (const c of customers) {
+          const hasFam = !c.recommendedFamilies?.length || c.recommendedFamilies.includes(f.id);
+          if (!hasFam) continue;
+          for (let i = 0; i < dates.length; i++) {
+            const fcstQty = jitter(seedVal(bpSeeds.mthAop, i));
+            rows.push([p.id, l.id, dates[i], c.custId, '', '', fcstQty, fcstQty, '', '', '', ''].join(','));
+          }
+        }
+      }
+    }
+  }
+  return csv(h, rows);
+}
+
+function genMthProdSaCust(customers, families) {
+  // IPAV2__MTHPRODSACUST_TEMPLATE.csv — monthly consensus/statistical lag KFs (header-only)
+  const h = 'PRDID,KEYFIGUREDATE,CUSTID,SALESAREA,' +
+            'ZCDISTRIBUTORBIAS,CONSENSUSDEMANDQTY1MLAG,CONSENSUSDEMANDQTY3MLAG,' +
+            'STATISTICALFORECASTQTYBIAS,STATISTICALFORECASTQTYERROR,' +
+            'ZCCONSENSDMDDWPROMOQ1MLAG,ZCCONSENSDMDDWPROMOQ3MLAG,' +
+            'FINALCONSENSUSDEMANDQTY1MLAG,FINALCONSENSUSDEMANDQTY3MLAG';
+  return csvHeader(h);
+}
+
+function genMthRopRdfamCustReg(customers, locs, families) {
+  // IPAV2__MTHROPRDFAMCUSTREG_TEMPLATE.csv — replenishment order aggregation (header-only)
+  return csvHeader('KEYFIGUREDATE,SALESAREA,CUSTREGION,PRDFAMILY,ROPID,ROAGGSLSQTY');
+}
+
+function genWkProdSaCust(customers, families) {
+  // IPAV2__WKPRODSACUST_TEMPLATE.csv — weekly price reduction KF
+  const h = 'PRDID,KEYFIGUREDATE,CUSTID,SALESAREA,ZCPRICEREDUCT';
+  const dates = weekDates(26);
+  const rows = [];
+  for (const f of families) {
+    for (const p of (f.fg || [])) {
+      for (const c of customers) {
+        const hasFam = !c.recommendedFamilies?.length || c.recommendedFamilies.includes(f.id);
+        if (!hasFam) continue;
+        for (const d of dates) {
+          rows.push(`${p.id},${d},${c.custId},,0`);
+        }
+      }
+    }
+  }
+  return csv(h, rows);
+}
+
 // Static files — copied from BP ZIP as-is
 const STATIC_MASTER = [
   '060_LAG_2608.CSV', '070_SERVICELEVELCLASS_2608.CSV',
@@ -978,6 +1105,7 @@ function generateZip(analysis, selections) {
   addFile('Master_Data/180_PRODUCTIONSOURCERESOURCE_NEW.CSV', gen180ProductionSourceResource(locs, families, routing, resources));
   addFile('Master_Data/190_SOURCECUSTGROUP_NEW.CSV',        gen190SourceCustGroup(customers, locs, families));
   addFile('Master_Data/200_SA_NEW.CSV',                     gen200SalesArea(customers));
+  addFile('Master_Data/205_PLANNINGUNIT_NEW.CSV',           genPlanningUnit());
 
   // Static master data from BP ZIP
   for (const fname of STATIC_MASTER) {
@@ -988,28 +1116,34 @@ function generateZip(analysis, selections) {
   }
 
   // ── KF Data ──────────────────────────────────────────────────────────────
-  addFile('KF_Data/IPAV2__WKPRODLOC_NEW.csv',           genWkProdLoc(locs, families));
-  addFile('KF_Data/IPAV2__WKPRODLOCSRC_NEW.csv',        genWkProdLocSrc(locs, families));
-  addFile('KF_Data/IPAV2__WKPRODLOCCUST_NEW.csv',       genWkProdLocCust(customers, locs, families));
-  addFile('KF_Data/IPAV2__WKPRODLOCSACUST_NEW.csv',     genWkProdLocSaCust(customers, locs, families));
-  addFile('KF_Data/IPAV2__WKPRODLOCCURR_NEW.csv',       genWkProdLocCurr(locs, families));
-  addFile('KF_Data/IPAV2__WKRESLOC_NEW.csv',            genWkResLoc(locs));
-  addFile('KF_Data/IPAV2__WKRESPRODLOCSRC_NEW.csv',     genWkResProdLocSrc(locs, families));
-  addFile('KF_Data/IPAV2__DAYPRODLOCSACUST_NEW.csv',    genDayProdLocCust(customers, locs, families));
-  addFile('KF_Data/IPAV2__MTHCOSTCENTERCURR_NEW.csv',   genMthCostCenterCurr(customers));
-  addFile('KF_Data/IPAV2__MTHPRODSACUSTCURR_NEW.csv',   genMthProdSaCustCurr(customers, families));
-  addFile('KF_Data/IPAV2__WKPRODSACUSTCURR_NEW.csv',    genWkProdSaCustCurr(customers, families));
+  addFile('KF_Data/IPAV2__WKPRODLOC_NEW.csv',              genWkProdLoc(locs, families));
+  addFile('KF_Data/IPAV2__WKPRODLOCSRC_NEW.csv',           genWkProdLocSrc(locs, families));
+  addFile('KF_Data/IPAV2__WKPRODLOCCUST_NEW.csv',          genWkProdLocCust(customers, locs, families));
+  addFile('KF_Data/IPAV2__WKPRODLOCSACUST_NEW.csv',        genWkProdLocSaCust(customers, locs, families));
+  addFile('KF_Data/IPAV2__WKPRODLOCCURR_NEW.csv',          genWkProdLocCurr(locs, families));
+  addFile('KF_Data/IPAV2__WKRESLOC_NEW.csv',               genWkResLoc(locs));
+  addFile('KF_Data/IPAV2__WKRESPRODLOCSRC_NEW.csv',        genWkResProdLocSrc(locs, families));
+  addFile('KF_Data/IPAV2__WKPRODSACUST_NEW.csv',           genWkProdSaCust(customers, families));
+  addFile('KF_Data/IPAV2__DAYPRODLOCSACUST_NEW.csv',       genDayProdLocCust(customers, locs, families));
+  addFile('KF_Data/IPAV2__MTHCOSTCENTERCURR_NEW.csv',      genMthCostCenterCurr(customers));
+  addFile('KF_Data/IPAV2__MTHPRODCUSTCURR_NEW.csv',        genMthProdCustCurrKf(customers, families));
+  addFile('KF_Data/IPAV2__MTHPRODLOCSACUSTCURR_NEW.csv',   genMthProdLocsaCustCurr(customers, locs, families));
+  addFile('KF_Data/IPAV2__MTHPRODLOCSACUST_NEW.csv',       genMthProdLocsaCust(customers, locs, families));
+  addFile('KF_Data/IPAV2__MTHPRODSACUST_NEW.csv',          genMthProdSaCust(customers, families));
+  addFile('KF_Data/IPAV2__MTHPRODSACUSTCURR_NEW.csv',      genMthProdSaCustCurr(customers, families));
+  addFile('KF_Data/IPAV2__MTHROPRDFAMCUSTREG_NEW.csv',     genMthRopRdfamCustReg(customers, locs, families));
+  addFile('KF_Data/IPAV2__WKPRODSACUSTCURR_NEW.csv',       genWkProdSaCustCurr(customers, families));
 
   // README
   const company = analysis.company || {};
-  const totalFiles = 15 + STATIC_MASTER.filter(f => bpData[f]).length + 11;
+  const totalFiles = 16 + STATIC_MASTER.filter(f => bpData[f]).length + 17;
   addFile('README.txt', `IBP Configuration Package — Planning Area IPAV2
 Company: ${company.name || ''}
 Industry: ${company.industry || ''}
 Generated: ${new Date().toISOString()}
 
-Master Data files: 15 generated + ${STATIC_MASTER.filter(f => bpData[f]).length} static (from BP 2608)
-KF Data files: 11 generated (IPAV2 KF sets)
+Master Data files: 16 generated + ${STATIC_MASTER.filter(f => bpData[f]).length} static (from BP 2608)
+KF Data files: 17 generated (IPAV2 KF sets)
 Total: ${totalFiles} files
 
 Import Order:
