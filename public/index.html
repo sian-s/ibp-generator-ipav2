@@ -314,12 +314,18 @@ input:focus,select:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 
     <div class="step-panel" id="step4">
       <div class="card">
         <div class="card-title">Review &amp; Download</div>
-        <div class="card-sub">All IBP-ready files are generated. Download the ZIP and import directly into SAP IBP.</div>
+        <div class="card-sub">Server-side IPAV2 safety checks apply to every customer and Excel upload. Review VALIDATION_REPORT.json and UPLOAD_ORDER.txt before importing.</div>
         <div class="summary-grid" id="summaryGrid"></div>
-        <div class="alert alert-success" id="readyAlert" style="display:none">✓ Files ready. Download the ZIP and import into SAP IBP (Master Data first, then KF Data).</div>
+        <div class="alert alert-success" id="readyAlert" style="display:none">✓ Ready for server validation. Download the ZIP, review warnings and follow UPLOAD_ORDER.txt. Unconfirmed production-resource links remain header-only.</div>
         <div class="preview-title">Files included</div>
         <div class="file-list" id="fileList"></div>
         <div id="previewContent"></div>
+        <details style="margin-top:1rem">
+          <summary>IPAV2 고급 설정 (확인된 모델 값만 입력)</summary>
+          <p>미확인 생산 Resource 연결은 기본적으로 제외됩니다. 합성 데모 실적을 실제 실적으로 업로드하지 마세요.</p>
+          <label for="generationOptions">JSON: planningUnitId, productionLocations, confirmedProductionResourceIds, productionResourceTypeCode, capacityProfiles</label>
+          <textarea id="generationOptions" rows="6" style="width:100%;font-family:monospace" placeholder='{"planningUnitId":"CUSTOMER_PLAN"}'></textarea>
+        </details>
         <div class="btn-row">
           <button class="btn btn-secondary" onclick="goStep(3)">← Back</button>
           <button class="btn btn-success" onclick="downloadZip()">⬇ Download IBP ZIP</button>
@@ -689,7 +695,7 @@ function renderLocCards(locs) {
           </select></div>
           <div><label>Type</label><select onchange="updateLoc(${idx},'locType',this.value)">
             <option ${(l.locType==='P'||!l.locType)?'selected':''} value="P">P — Plant</option>
-            <option ${l.locType==='D'?'selected':''} value="D">D — DC</option>
+            <option ${(l.locType==='DC'||l.locType==='D')?'selected':''} value="DC">DC — Distribution Center</option>
           </select></div>
         </div>
       </div>
@@ -888,31 +894,37 @@ const MASTER_FILES = [
   {label:'110_CUSTOMERPRODUCT',       type:'Master', desc:'Customer–product assignments'},
   {label:'120_LOCATIONPRODUCT',       type:'Master', desc:'Location–product planning data'},
   {label:'130_RESOURCELOCATION',      type:'Master', desc:'Resource–location assignments'},
+  {label:'135_RESOURCELOCATIONPRODUCT',type:'Master', desc:'Resource/product links (verified production only)'},
   {label:'140_SOURCECUSTOMER',        type:'Master', desc:'Customer sourcing network'},
-  {label:'150_SOURCELOCATION',        type:'Master', desc:'DC→Plant sourcing network'},
+  {label:'150_SOURCELOCATION',        type:'Master', desc:'Plant→DC transport network'},
   {label:'160_SOURCEPRODUCTIONHEADER',type:'Master', desc:'Production source headers'},
   {label:'170_PRODUCTIONSOURCEITM',   type:'Master', desc:'Production BOM items'},
   {label:'180_PRODUCTIONSOURCERESOURCE',type:'Master',desc:'Production resource links'},
   {label:'190_SOURCECUSTGROUP',       type:'Master', desc:'Customer group demand stream'},
+  {label:'200_SA',                    type:'Master', desc:'Sales Area master'},
+  {label:'205_PLANNINGUNIT',          type:'Master', desc:'Planning Unit — upload first'},
   {label:'220_FORECASTCONSUMPTIONMODE',type:'Master',desc:'Forecast consumption modes (BP ref)'},
   {label:'240_DSFULFILLMENT',         type:'Master', desc:'DS fulfillment days (BP ref)'},
   {label:'280_INTERVAL',              type:'Master', desc:'Lead time intervals (BP ref)'},
 ];
 const KF_FILES = [
-  {label:'MTHPRODCUST',         type:'KF', desc:'Monthly AOP qty (seeded from BP)'},
-  {label:'MTHPRODCUSTCURR',     type:'KF', desc:'Monthly AOP revenue & profit'},
+  {label:'MTHPRODCUSTCURR',     type:'KF', desc:'Inventory value segmentation template'},
+  {label:'MTHPRODLOCSACUSTCURR',type:'KF', desc:'Monthly budget'},
+  {label:'MTHPRODLOCSACUST',    type:'KF', desc:'Monthly ML forecast proposal'},
+  {label:'MTHPRODSACUST',       type:'KF', desc:'Consensus/statistical lag template'},
+  {label:'MTHROPRDFAMCUSTREG',  type:'KF', desc:'DBP driver input template (register Driver in IBP)'},
+  {label:'MTHCOSTCENTERCURR',   type:'KF', desc:'Finance budget factor'},
+  {label:'MTHPRODSACUSTCURR',   type:'KF', desc:'Monthly price'},
   {label:'WKPRODLOC',           type:'KF', desc:'Weekly inventory & cost rates'},
   {label:'WKPRODLOCSRC',        type:'KF', desc:'Weekly production cost rates'},
-  {label:'WKPRODLOCCUST',       type:'KF', desc:'Weekly actuals + sales forecast'},
-  {label:'WKPRODLOCCUSTGROUP',  type:'KF', desc:'Weekly IO forecast by customer group'},
-  {label:'WKPRODLOCCUSTCURR',   type:'KF', desc:'Weekly actuals & open orders revenue'},
-  {label:'WKPRODLOCLOCTO',      type:'KF', desc:'Transportation cost rates Plant→DC'},
+  {label:'WKPRODLOCCUST',       type:'KF', desc:'Weekly customer sourcing ratios'},
+  {label:'WKPRODLOCSACUST',     type:'KF', desc:'Uploaded actuals or 105-week demo history + demo forecast'},
   {label:'WKRESLOC',            type:'KF', desc:'Weekly resource capacity supply'},
   {label:'WKRESPRODLOCSRC',     type:'KF', desc:'Weekly capacity consumption per product'},
-  {label:'WKPRODCUSTCURR',      type:'KF', desc:'Weekly planned price per customer'},
+  {label:'WKPRODSACUST',        type:'KF', desc:'Price reduction input'},
+  {label:'WKPRODSACUSTCURR',    type:'KF', desc:'Weekly price'},
   {label:'WKPRODLOCCURR',       type:'KF', desc:'Weekly cost per unit at location'},
-  {label:'WKPRODFMLLOCRGN',     type:'KF', desc:'Family/region inventory budget flag'},
-  {label:'DAYPRODLOCCUST',      type:'KF', desc:'Historical weekly delivery quantities'},
+  {label:'DAYPRODLOCSACUST',    type:'KF', desc:'Demo delivery quantities'},
 ];
 const ALL_FILES = [...MASTER_FILES, ...KF_FILES];
 
@@ -928,7 +940,7 @@ function buildPreview() {
     {val:S.customers.length,  lbl:'Customer Records'},
     {val:fgs.length,          lbl:'FG Products'},
     {val:locs.length,         lbl:'Locations'},
-    {val:ALL_FILES.length,    lbl:'Files Generated'},
+    {val:ALL_FILES.length,    lbl:'CSV/Optional REF Inventory'},
   ].map(t=>`<div class="summary-tile"><div class="val">${t.val}</div><div class="lbl">${t.lbl}</div></div>`).join('');
 
   document.getElementById('fileList').innerHTML = ALL_FILES.map(f=>
@@ -991,6 +1003,8 @@ async function downloadZip() {
         selectedLocationIds: [...S.selectedLocations],
       },
     };
+    const optionsText = document.getElementById('generationOptions').value.trim();
+    if (optionsText) payload.selections.generationOptions = JSON.parse(optionsText);
 
     const res = await fetch('/api/generate', {
       method: 'POST',
@@ -999,8 +1013,8 @@ async function downloadZip() {
     });
 
     if (!res.ok) {
-      const err = await res.text();
-      throw new Error(err);
+      const err = await res.json();
+      throw new Error(err.error || 'Generation failed');
     }
 
     const blob = await res.blob();

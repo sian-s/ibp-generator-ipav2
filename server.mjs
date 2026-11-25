@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
 import AdmZip from 'adm-zip';
 import XLSX from 'xlsx';
+import { RULES_PROMPT, GenerationValidationError, csvRow, prepareGeneration, applyRules } from './generation-rules.mjs';
+import { technicalMappings, applyLocationProductMappings, extractActuals, extractTechnicalSources } from './excel-mapping.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
@@ -143,6 +145,7 @@ function extractSeeds() {
 }
 
 loadBpZip();
+if (!Object.keys(bpSeeds).length) extractSeeds();
 
 // ─── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -191,7 +194,7 @@ function jitter(base, pct = 0.15) {
 
 // ─── CSV generation helpers ───────────────────────────────────────────────────
 
-const csv = (header, rows) => rows.length ? 'sep=,\n' + header + '\n' + rows.join('\n') : null;
+const csv = (header, rows) => 'sep=,\n' + header + '\n' + rows.join('\n');
 const csvHeader = (header) => 'sep=,\n' + header + '\n';
 
 // Normalize LOCTYPE to IBP standard codes (P=Plant, DC=Distribution Center, S=Supplier, C=Customer)
@@ -214,23 +217,23 @@ function sourceId(prdId, locId) {
 function gen010Customer(customers) {
   // CP1CUSTOMER_TEMPLATE (1).csv — 39 columns
   const h = 'CUSTID,COSTCENTER,COSTCENTERDESCR,COSTCENTEROWNER,CPCUSTATT01,CPCUSTATT02,CPCUSTATT03,CUSTBUPAID,CUSTCHANNEL,CUSTCOUNTRY,CUSTDESCR,CUSTGROUP,CUSTGROUPDESC,CUSTREGION,CUSTREGIONDESCR,CUSTSALESREP,CUSTSALESVP,CUSTVALID,EQUIPNR,FLOCDESCR,FLOCID,FUNCTHIER1,FUNCTHIER2,GEOLATITUDE,GEOLONGITUDE,KEYACCOUNT,PLANT,ZXCUSTPRIORITY,ZXKAM,ZXSALESTER,ZXSEGCUSTCHANABCID,ZXSEGCUSTCHANABCLOCKED,ZXSEGCUSTCHANXYZID,ZXSEGCUSTCHANXYZLOCKED,ZXSEGCUSTOMERABCID,ZXSEGCUSTOMERABCLOCKED,ZXSEGCUSTOMERXYZID,ZXSEGCUSTOMERXYZLOCKED,ZXTSM';
-  return csv(h, customers.map(c => [
+  return csv(h, customers.map(c => csvRow([
     c.custId, `CC-${c.custId}`, `Cost Center ${c.custId}`, '', '', '', '', '',
     c.channel, c.country, c.custdescr, c.group, '',
     c.region || '',             // CUSTREGION
     '', '', '',
     'X',                        // CUSTVALID: must be 'X' for active records
     '', '', '', '', '',
-    c.lat || '', c.lon || '',
+    c.lat ?? '', c.lon ?? '',
     '', '', '', '', '', '', '', '', '', '', '', '', '', '',
-  ].join(',')));
+  ])));
 }
 
 function gen020Location(locs) {
   const h = 'LOCID,CPLOCATT01,CPLOCATT02,CPLOCATT03,GEOLATITUDE,GEOLONGITUDE,HLOCATIONCOUNTER,HOLDINGCOSTPCT,LOCBUPAID,LOCCITY,LOCCOUNTRY,LOCDESCR,LOCREGION,LOCTYPE,LOCVALID';
   return csv(h, locs.map(l =>
-    [l.id, '', '', '',
-     l.lat || '', l.lon || '',
+    csvRow([l.id, '', '', '',
+     l.lat ?? '', l.lon ?? '',
      '', '', '',
      l.city || l.desc || '',   // LOCCITY: fallback to desc (matches LX format)
      l.country || '',
@@ -238,7 +241,7 @@ function gen020Location(locs) {
      l.region || '',
      normLocType(l.locType),   // normalize to IBP standard: P / DC / S / C
      'X',                      // LOCVALID: must be 'X' for active records (LX confirmed)
-    ].join(',')
+    ])
   ));
 }
 
@@ -254,14 +257,14 @@ function gen030Product(families) {
       ...(f.raw  || []).map(p => ({ ...p, type: 'ROH',  abc: '', xlk: '', xyz: '' })),
     ];
     for (const p of allPrds) {
-      rows.push([
+      rows.push(csvRow([
         p.id, p.abc, p.xlk,
         '', '', f.brand, '', '', '', '', '', '', '', '',
         '', p.type, '', '', 'EXISTING', '',
         p.desc || p.id, f.code, '', f.group, '', subfam, 'X', '', '', '',  // PRDVALID='X'
         'PIECE', 'PC', p.xyz, '',
         '', '', '', '', '', '', '', '', '', '', '', '', '', '',
-      ].join(','));
+      ]));
     }
   }
   return csv(h, rows);
@@ -286,12 +289,8 @@ function gen040Resource(locs, routing) {
   const rows = [];
   for (const l of locs) {
     rows.push(
-      `${l.id} ASSEMBLY,${l.desc} Assembly,${validateResType('ASSEMBLY')}`,
-      `${l.id} PACK,${l.desc} Pack,${validateResType('PACK')}`,
-      `${l.id} SUBASSEMBLY,${l.desc} Subassembly,${validateResType('SUBASSEMBLY')}`,
-      `${l.id} STORAGE,${l.desc} Storage,${validateResType('STORAGE')}`,
-      `${l.id} TRANSPORT,${l.desc} Transport,${validateResType('TRANSPORT')}`,
-      `${l.id} HANDLING,${l.desc} Handling,${validateResType('HANDLING')}`,
+      ...['ASSEMBLY', 'PACK', 'SUBASSEMBLY', 'STORAGE', 'TRANSPORT', 'HANDLING'].map(type =>
+        csvRow([`${l.id} ${type}`, `${l.desc} ${type}`, validateResType(type)])),
     );
   }
   return csv(h, rows);
@@ -373,17 +372,20 @@ function gen135ResourceLocationProduct(locs, families) {
   return csv(h, rows);
 }
 
-function gen140SourceCustomer(customers, locs, families) {
+function gen140SourceCustomer(customers, locs, families, ctx) {
   // CP1SOURCECUSTOMER_TEMPLATE.csv — 11 columns
   const h = 'CUSTID,LOCID,PRDID,CBALANCERECEIPTSCOPE,CINVALID,CRATIO,CROUNDING,FCSTCONSMODE,LEADTIME,MATTRSOURCECUSTOMER,RATIOTS';
   const rows = [];
   for (const c of customers) {
-    const nearLocs = locs.filter(l => l.region === c.region).slice(0, 2);
-    const servLocs = nearLocs.length ? nearLocs : locs.slice(0, 1);
     const fams = c.recommendedFamilies?.length ? families.filter(f => c.recommendedFamilies.includes(f.id)) : families;
     for (const f of fams) {
       for (const p of (f.fg || [])) {
-        const ratio = servLocs.length > 1 ? 0.5 : 1;
+        const validLocs = locs.filter(l => ctx.stocked.has(`${p.id}|${l.id}`));
+        const nearLocs = validLocs.filter(l => l.region === c.region);
+        const candidates = nearLocs.length ? nearLocs : validLocs;
+        const dcs = candidates.filter(l => l.locType === 'DC');
+        const servLocs = (dcs.length ? dcs : candidates).slice(0, 2);
+        const ratio = 1 / servLocs.length;
         for (const l of servLocs) rows.push(`${c.custId},${l.id},${p.id},,,${ratio},,CONTINUOUS,,,`);
       }
     }
@@ -391,20 +393,21 @@ function gen140SourceCustomer(customers, locs, families) {
   return csv(h, rows);
 }
 
-function gen150SourceLocation(locs, families, leadTimes) {
+function gen150SourceLocation(locs, families, leadTimes, ctx) {
   // CP1SOURCELOCATION_TEMPLATE.csv — 23 columns
   const h = 'LOCFR,LOCID,MOTID,PRDID,FOOTPRINTSUPPLIERPERUNIT,LEADTIME,MATTRSOURCELOCATION,MAXLOCATIONQUOTA,MINLOCATIONQUOTA,RATIOTS,TBALANCERECEIPTSCOPE,TCAPACONSPOLICY,TDELIVERYTYPE,TFREEZEHORIZON,TINCLOTSIZE,TINVALID,TLEADTIME,TLEADTIMEVARIABILITY,TMAXLOTSIZE,TMINLOTSIZE,TRATIO,TROUNDING,TSHIPMENTFREQUENCY';
   const rows = [];
   const distLt = Math.round(Number(leadTimes?.distribution) || 2);
   const plants = locs.filter(l => l.locType === 'P' || l.locType === 'Plant');
-  const dcs    = locs.filter(l => l.locType !== 'P' && l.locType !== 'Plant');
+  const dcs    = locs.filter(l => l.locType === 'DC');
   for (const f of families) {
     for (const p of (f.fg || [])) {
-      for (const dc of (dcs.length ? dcs : locs)) {
-        const sourcePlants = plants.filter(pl => pl.id !== dc.id && pl.region === dc.region);
-        const targets = sourcePlants.length ? sourcePlants : plants.filter(pl => pl.id !== dc.id).slice(0, 1);
+      for (const dc of dcs) {
+        const productPlants = plants.filter(pl => ctx.production.has(`${p.id}|${pl.id}`));
+        const sourcePlants = productPlants.filter(pl => pl.id !== dc.id && pl.region === dc.region);
+        const targets = sourcePlants.length ? sourcePlants : productPlants.filter(pl => pl.id !== dc.id).slice(0, 1);
         if (!targets.length) continue;
-        const ratio = targets.length > 1 ? 0.5 : 1;
+        const ratio = 1 / targets.length;
         for (const pl of targets) {
           rows.push([pl.id, dc.id, '', p.id, '', distLt, '', '', '', '', '', '', '', '', '', '', distLt, '', '', '', ratio, '', ''].join(','));
         }
@@ -422,29 +425,21 @@ function gen160SourceProductionHeader(locs, families, routing, leadTimes) {
   const plants = locs.filter(l => l.locType === 'P' || l.locType === 'Plant');
   const workLocs = plants.length ? plants : locs;
 
-  // Build workCenter lookup from routing: product → workCenter (first match)
-  const wcByProduct = new Map();
-  if (routing && routing.length) {
-    for (const r of routing) {
-      if (r.product && !wcByProduct.has(r.product)) wcByProduct.set(r.product, r.workCenter || '');
-    }
-  }
-
-  // families 기준으로 모든 FG/SEMI 제품 행 생성, routing은 workCenter 조회에만 사용
+  // Unverified routing work centers must never populate CPPRODUCTIONLINE.
   for (const l of workLocs) {
     for (const f of families) {
       for (const p of [...(f.fg || []), ...(f.semi || [])]) {
         if (!p.id) continue;
-        const wc = wcByProduct.get(p.id) || '';
+        const wc = '';
         const sid = sourceId(p.id, l.id);
-        rows.push([l.id, p.id, sid, wc, '', '100', '', '', '', '', '', '', '', prodLt, '', '', '', '', '1', '', '', '', '', '', 'P'].join(','));
+        rows.push([l.id, p.id, sid, wc, '', '1', '', '', '', '', '', '', '', prodLt, '', '', '', '', '1', '', '', '', '', '', 'P'].join(','));
       }
     }
   }
   return csv(h, rows);
 }
 
-function gen170ProductionSourceItm(locs, families, bom) {
+function gen170ProductionSourceItm(locs, families, bom, allowSyntheticBom = true) {
   // CP1PRODUCTIONSOURCEITM_TEMPLATE.csv — 8 columns
   const h = 'PRDID,SOURCEID,COMPONENTCOEFFICIENT,COMPONENTCOEFFICIENTTS,COMPONENTOFFSET,LOCID,MINSHELFLIFECOMP,SOURCEITMID';
   const rows = [];
@@ -476,19 +471,19 @@ function gen170ProductionSourceItm(locs, families, bom) {
     for (const b of bom) {
       if (!sourceProducts.has(b.parent)) continue;
       if (!knownProducts.has(b.component)) continue;
-      const loc = locByPlant[b.plant] || workLocs[0];
+      const loc = workLocs.find(l => l.id === b.plant) || locByPlant[b.plant] || (!b.plant ? workLocs[0] : null);
       if (!loc) continue;
       const sid = sourceId(b.parent, loc.id);
-      const key = `${b.component}|${sid}`;
+      const key = `${b.component}|${sid}|${b.seq || b.component}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      rows.push([b.component, sid, b.qty, '', '0', loc.id, '', b.seq || b.component].join(','));
+      rows.push(csvRow([b.component, sid, b.qty, '', '0', loc.id, '', b.seq || b.component]));
       usedBom = true;
     }
   }
 
   // Fallback to families-based logic when BOM had no matching entries
-  if (!usedBom) {
+  if (allowSyntheticBom && !usedBom && !bom?.length) {
     let seq = 10;
     for (const l of workLocs) {
       for (const f of families) {
@@ -497,13 +492,15 @@ function gen170ProductionSourceItm(locs, families, bom) {
         const raws  = f.raw  || [];
         for (const fg of fgs) {
           const sid = sourceId(fg.id, l.id);
-          const comp = semis[0] || raws[0] || fg; // FG이라도 유효한 컴포넌트로 사용
+          const comp = semis[0] || raws[0];
+          if (!comp || comp.id === fg.id) continue;
           rows.push([comp.id, sid, '1', '', '0', l.id, '', String(seq).padStart(4, '0')].join(','));
           seq += 10;
         }
         for (const semi of semis) {
           const sid = sourceId(semi.id, l.id);
-          const raw = raws[1] || raws[0] || semi;
+          const raw = raws[1] || raws[0];
+          if (!raw || raw.id === semi.id) continue;
           rows.push([raw.id, sid, '1', '', '0', l.id, '', String(seq).padStart(4, '0')].join(','));
           seq += 10;
         }
@@ -541,7 +538,7 @@ function gen190SourceCustGroup(customers, locs, families) {
   for (const l of locs) {
     for (const f of families) {
       for (const p of (f.fg || [])) {
-        for (const g of groups) rows.push([g, l.id, p.id, '', '', ''].join(','));
+        for (const g of groups) rows.push(csvRow([g, l.id, p.id, '', '', '']));
       }
     }
   }
@@ -562,7 +559,7 @@ function gen200SalesArea(customers) {
   const rows = channels.map(ch => {
     const code = CHAN_CODE[ch] || '10';
     const sa   = `1010/${code}/00`;
-    return [sa, '1010', '', '', '', '', code, `${ch} Sales`, '00', 'Product Division', '1010', 'Sales Org'].join(',');
+    return csvRow([sa, '1010', '', '', '', '', code, `${ch} Sales`, '00', 'Product Division', '1010', 'Sales Org']);
   });
   return csv(h, rows);
 }
@@ -642,7 +639,7 @@ function genWkProdLocSrc(locs, families) {
   return csv(h, rows);
 }
 
-function genWkProdLocCust(customers, locs, families) {
+function genWkProdLocCust(customers, locs, families, ctx) {
   // IPAV2 WKPRODLOCCUST: ratio/cost data only (forecast/actuals moved to WKPRODLOCSACUST)
   const h = 'PRDID,LOCID,KEYFIGUREDATE,CUSTID,CRATIO,CUSTOMERRATIO,CUSTOMERTRANSPORTATIONCOSTRATE';
   const dates = weekDates(26);
@@ -652,11 +649,14 @@ function genWkProdLocCust(customers, locs, families) {
       for (const c of customers) {
         const hasFam = !c.recommendedFamilies?.length || c.recommendedFamilies.includes(f.id);
         if (!hasFam) continue;
-        const nearLocs = locs.filter(l => l.region === c.region).slice(0, 1);
-        const servLocs = nearLocs.length ? nearLocs : locs.slice(0, 1);
+        const validLocs = locs.filter(l => ctx.stocked.has(`${p.id}|${l.id}`));
+        const nearLocs = validLocs.filter(l => l.region === c.region);
+        const candidates = nearLocs.length ? nearLocs : validLocs;
+        const dcs = candidates.filter(l => l.locType === 'DC');
+        const servLocs = (dcs.length ? dcs : candidates).slice(0, 2);
         for (const l of servLocs) {
           for (const d of dates) {
-            rows.push(`${p.id},${l.id},${d},${c.custId},1,1,`);
+            rows.push(`${p.id},${l.id},${d},${c.custId},${1 / servLocs.length},${1 / servLocs.length},`);
           }
         }
       }
@@ -666,9 +666,9 @@ function genWkProdLocCust(customers, locs, families) {
 }
 
 function genWkProdLocSaCust(customers, locs, families) {
-  // IPAV2 WKPRODLOCSACUST: all products × all locs × all customers (52wk past + 26wk future)
+  // Demo history is replaced with uploaded actuals by the common validation layer.
   const h = 'PRDID,LOCID,KEYFIGUREDATE,CUSTID,SALESAREA,ACTUALSQTY,SALESFORECASTQTY,DEMANDPLANNINGQTY,WEEKLYOPENORDER';
-  const pastDates = pastWeekDates(52);
+  const pastDates = pastWeekDates(105); // >= two years of clearly labelled synthetic demo history
   const futDates  = weekDates(26);
   const allDates  = [...pastDates, ...futDates];
   const s = bpSeeds;
@@ -1073,7 +1073,7 @@ function genWkProdSaCust(customers, families) {
         const hasFam = !c.recommendedFamilies?.length || c.recommendedFamilies.includes(f.id);
         if (!hasFam) continue;
         for (const d of dates) {
-          rows.push(`${p.id},${d},${c.custId},,0`);
+          rows.push(`${p.id},${d},${c.custId},${salesArea(c.channel)},0`);
         }
       }
     }
@@ -1091,15 +1091,12 @@ const STATIC_MASTER = [
 
 // ─── Main generate function ───────────────────────────────────────────────────
 
-function generateZip(analysis, selections) {
-  const { customers, selectedFamilyIds, selectedLocationIds } = selections;
-  const allFamilies = analysis.productFamilies || [];
-  const allLocs = analysis.locations || [];
-
-  const families = allFamilies.filter(f => selectedFamilyIds.includes(f.id));
-  const locs = allLocs.filter(l => selectedLocationIds.includes(l.id));
-
-  const bom       = analysis.bom       || [];
+export function generateZip(analysis, selections) {
+  const ctx = prepareGeneration(analysis, selections);
+  analysis = ctx.analysis;
+  const { customers, families, locs } = ctx;
+  const bom = ctx.bom.flatMap(b => b.plant ? [b] : [...ctx.production]
+    .filter(k => k.startsWith(`${b.parent}|`)).map(k => ({ ...b, plant: k.split('|')[1] })));
   const resources = analysis.resources || [];
   const routing   = analysis.routing   || [];
   const leadTimes = analysis.leadTimes || { production: 1, outsourcing: 7, distribution: 2 };
@@ -1108,7 +1105,8 @@ function generateZip(analysis, selections) {
 
   const addFile = (filePath, content) => {
     if (!content) return;
-    zip.addFile(filePath, Buffer.from('﻿' + content, 'utf8'));
+    if (filePath.endsWith('.csv') || filePath.endsWith('.CSV')) content = applyRules(filePath, content, ctx, salesArea);
+    zip.addFile(filePath, Buffer.from((/\.csv$/i.test(filePath) ? '\uFEFF' : '') + content, 'utf8'));
   };
 
   // ── Master Data ──────────────────────────────────────────────────────────
@@ -1121,10 +1119,10 @@ function generateZip(analysis, selections) {
   addFile('Master_Data/120_LOCATIONPRODUCT_SOP_DP_NEW.CSV', gen120LocationProduct(locs, families));
   addFile('Master_Data/130_RESOURCELOCATION_NEW.CSV',       gen130ResourceLocation(locs, resources, routing));
   addFile('Master_Data/135_RESOURCELOCATIONPRODUCT_NEW.CSV', gen135ResourceLocationProduct(locs, families));
-  addFile('Master_Data/140_SOURCECUSTOMER_NEW.CSV',         gen140SourceCustomer(customers, locs, families));
-  addFile('Master_Data/150_SOURCELOCATION_SOP_DP_NEW.CSV',  gen150SourceLocation(locs, families, leadTimes));
+  addFile('Master_Data/140_SOURCECUSTOMER_NEW.CSV',         gen140SourceCustomer(customers, locs, families, ctx));
+  addFile('Master_Data/150_SOURCELOCATION_SOP_DP_NEW.CSV',  gen150SourceLocation(locs, families, leadTimes, ctx));
   addFile('Master_Data/160_SOURCEPRODUCTIONHEADER_NEW.CSV', gen160SourceProductionHeader(locs, families, routing, leadTimes));
-  addFile('Master_Data/170_PRODUCTIONSOURCEITM_NEW.CSV',    gen170ProductionSourceItm(locs, families, bom));
+  addFile('Master_Data/170_PRODUCTIONSOURCEITM_NEW.CSV',    gen170ProductionSourceItm(locs, families, bom, !analysis._importedFromExcel));
   addFile('Master_Data/180_PRODUCTIONSOURCERESOURCE_NEW.CSV', gen180ProductionSourceResource(locs, families, routing, resources));
   addFile('Master_Data/190_SOURCECUSTGROUP_NEW.CSV',        gen190SourceCustGroup(customers, locs, families));
   addFile('Master_Data/200_SA_NEW.CSV',                     gen200SalesArea(customers));
@@ -1141,7 +1139,7 @@ function generateZip(analysis, selections) {
   // ── KF Data ──────────────────────────────────────────────────────────────
   addFile('KF_Data/IPAV2__WKPRODLOC_NEW.csv',              genWkProdLoc(locs, families));
   addFile('KF_Data/IPAV2__WKPRODLOCSRC_NEW.csv',           genWkProdLocSrc(locs, families));
-  addFile('KF_Data/IPAV2__WKPRODLOCCUST_NEW.csv',          genWkProdLocCust(customers, locs, families));
+  addFile('KF_Data/IPAV2__WKPRODLOCCUST_NEW.csv',          genWkProdLocCust(customers, locs, families, ctx));
   addFile('KF_Data/IPAV2__WKPRODLOCSACUST_NEW.csv',        genWkProdLocSaCust(customers, locs, families));
   addFile('KF_Data/IPAV2__WKPRODLOCCURR_NEW.csv',          genWkProdLocCurr(locs, families));
   addFile('KF_Data/IPAV2__WKRESLOC_NEW.csv',               genWkResLoc(locs));
@@ -1157,43 +1155,38 @@ function generateZip(analysis, selections) {
   addFile('KF_Data/IPAV2__MTHROPRDFAMCUSTREG_NEW.csv',     genMthRopRdfamCustReg(customers, locs, families));
   addFile('KF_Data/IPAV2__WKPRODSACUSTCURR_NEW.csv',       genWkProdSaCustCurr(customers, families));
 
+  const generatedMasters = ctx.files.filter(f => f.file.startsWith('Master_Data/'));
+  const priority = name => name.includes('PLANNINGUNIT') ? 0 : name.includes('_REF') ? 1 :
+    name.includes('200_SA') ? 2 : Number(name.split('/').pop().slice(0, 3)) + 10;
+  const uploadOrder = [...generatedMasters].sort((a, b) => priority(a.file) - priority(b.file));
+  addFile('UPLOAD_ORDER.txt', uploadOrder.map((f, i) => `${i + 1}. ${f.file} (${f.rows} rows)`).join('\n') +
+    '\nThen KF_Data. Header-only files are templates: do not upload as deletes. Use the correct Base Version/scenario.\n');
+  addFile('VALIDATION_REPORT.json', JSON.stringify({ status: 'passed-with-warnings',
+    warnings: [...new Set(ctx.warnings)], userConfirmedProductionResources: [...ctx.confirmed],
+    planningUnitIds: [...ctx.planningUnits], actualHistorySource: ctx.actuals.length ? 'uploaded-excel' : 'synthetic-demo',
+    syntheticActualHistoryWeeks: ctx.actuals.length ? 0 : 105, uploadedActualRows: ctx.actuals.length, files: ctx.files }, null, 2));
+  addFile('GENERATION_GUIDELINES.md', fs.readFileSync(path.join(__dirname, 'docs', 'generation-guidelines.md'), 'utf8'));
+
   // README
   const company = analysis.company || {};
-  const totalFiles = 16 + STATIC_MASTER.filter(f => bpData[f]).length + 17;
+  const totalFiles = ctx.files.length;
   addFile('README.txt', `IBP Configuration Package — Planning Area IPAV2
 Company: ${company.name || ''}
 Industry: ${company.industry || ''}
 Generated: ${new Date().toISOString()}
 
-Master Data files: 16 generated + ${STATIC_MASTER.filter(f => bpData[f]).length} static (from BP 2608)
-KF Data files: 17 generated (IPAV2 KF sets)
-Total: ${totalFiles} files
+Master Data files: ${generatedMasters.length}
+KF Data files: ${ctx.files.length - generatedMasters.length} (including header-only templates)
+Total CSV files: ${totalFiles}
 
-Import Order:
-  1. 010_CUSTOMER_NEW.CSV
-  2. 020_LOCATION_NEW.CSV
-  3. 030_PRODUCT_NEW.CSV
-  4. 040_RESOURCE_NEW.CSV
-  5. 060_LAG_REF.CSV
-  6. 070_SERVICELEVELCLASS_REF.CSV
-  7. 080_CURRENCY_REF.CSV
-  8. 090_UOMTO_REF.CSV
-  9. 100_UOMCONVERSIONFACTOR_NEW.CSV
- 10. 105_EXCHANGE_RATE_REF.CSV
- 11. 110_CUSTOMERPRODUCT_NEW.CSV
- 12. 120_LOCATIONPRODUCT_SOP_DP_NEW.CSV
- 13. 130_RESOURCELOCATION_NEW.CSV
- 14. 140_SOURCECUSTOMER_NEW.CSV
- 15. 150_SOURCELOCATION_SOP_DP_NEW.CSV
- 16. 160_SOURCEPRODUCTIONHEADER_NEW.CSV
- 17. 170_PRODUCTIONSOURCEITM_NEW.CSV
- 18. 180_PRODUCTIONSOURCERESOURCE_NEW.CSV
- 19. 190_SOURCECUSTGROUP_NEW.CSV
- 20. 200_SA_NEW.CSV
- 21. 220_FORECASTCONSUMPTIONMODE_REF.CSV
- 21. 240_DSFULFILLMENT_REF.CSV
- 22. 280_INTERVAL_REF.CSV
- Then KF_Data files (any order).
+AUTHORITATIVE upload sequence: UPLOAD_ORDER.txt (Planning Unit and reference masters FIRST).
+Generation checks/warnings: VALIDATION_REPORT.json and GENERATION_GUIDELINES.md.
+History source: ${ctx.actuals.length ? 'Uploaded Excel actuals (no synthetic history backfill)' : 'SYNTHETIC DEMO DATA — not actual customer transactions'}.
+Future forecasts and delivery samples are SYNTHETIC DEMO DATA.
+Unconfirmed Production Category links are intentionally empty; do NOT upload these as Delete.
+
+Master Data inventory:
+${uploadOrder.map(f => `  ${f.file}`).join('\n')}
 
 IPAV2 KF Sets:
   IPAV2__WKPRODLOC          — Inventory, cost, CO2 (weekly / product-location)
@@ -1433,7 +1426,12 @@ function extractLocations(wb, mapping) {
       const rawCtry = m.countryCol != null ? String(r[m.countryCol] ?? '').trim() : '';
       const country = (rawCtry.length === 2 ? rawCtry.toUpperCase() : null) || mapping.companyCountry || 'KR';
       const coords  = getCityCoords(city) || getCityCoords(name) || COUNTRY_HQ[country] || { lat: 37.57 + i * 0.1, lon: 126.98 + i * 0.1 };
-      return { id: `LOC-${id}`, desc: name || id, locType: 'P', region: getCountryRegion(country), country, city: city || name, lat: coords.lat, lon: coords.lon };
+      return { id: id.startsWith('LOC-') ? id : `LOC-${id}`, desc: name || id,
+        locType: m.typeCol != null ? normLocType(r[m.typeCol]) : 'P',
+        region: m.regionCol != null && r[m.regionCol] ? String(r[m.regionCol]).trim() : getCountryRegion(country),
+        country, city: city || name,
+        lat: m.latCol != null && r[m.latCol] !== '' ? Number(r[m.latCol]) : coords.lat,
+        lon: m.lonCol != null && r[m.lonCol] !== '' ? Number(r[m.lonCol]) : coords.lon };
     });
 }
 
@@ -1446,7 +1444,6 @@ function extractCustomers(wb, mapping) {
   const skip = m.headerRows ?? 1;
   return rows.slice(skip)
     .filter(r => String(r[m.idCol] ?? '').trim())
-    .slice(0, 10)
     .map((r, i) => {
       const id      = String(r[m.idCol]).trim();
       const name    = String(r[m.nameCol] ?? '').trim();
@@ -1455,7 +1452,12 @@ function extractCustomers(wb, mapping) {
       const city    = m.cityCol    != null ? String(r[m.cityCol]    ?? '').trim() : '';
       const channel = m.channelCol != null ? String(r[m.channelCol] ?? '').trim() : 'Direct';
       const coords  = getCityCoords(city) || COUNTRY_HQ[country] || { lat: 37.57 + (i % 5) * 0.2, lon: 126.98 + (i % 5) * 0.3 };
-      return { custId: id, country, region: getCountryRegion(country), channel: channel || 'Direct', group: 'Industry', custdescr: (name && name !== id) ? name : `Customer ${id}`, lat: coords.lat, lon: coords.lon, recommendedFamilies: [] };
+      return { custId: id, country,
+        region: m.regionCol != null && r[m.regionCol] ? String(r[m.regionCol]).trim() : getCountryRegion(country),
+        salesArea: m.salesAreaCol != null ? String(r[m.salesAreaCol] || '').trim() : '',
+        channel: channel || 'Direct', group: 'Industry', custdescr: (name && name !== id) ? name : `Customer ${id}`,
+        lat: m.latCol != null && r[m.latCol] !== '' ? Number(r[m.latCol]) : coords.lat,
+        lon: m.lonCol != null && r[m.lonCol] !== '' ? Number(r[m.lonCol]) : coords.lon, recommendedFamilies: [] };
     });
 }
 
@@ -1474,13 +1476,19 @@ function extractProductFamilies(wb, mapping) {
     const fam  = m.familyCol != null ? String(row[m.familyCol] ?? '').trim() : 'General';
     const key  = fam || 'General';
     if (!familyMap[key]) familyMap[key] = [];
-    if (familyMap[key].length < 10) familyMap[key].push({ id, desc: desc || id });
+    familyMap[key].push({ id, desc: desc || id,
+      uomId: m.uomCol != null ? String(row[m.uomCol] || '').trim() || 'PC' : 'PC',
+      materialType: m.typeCol != null ? String(row[m.typeCol] || '').trim().toUpperCase() : 'FERT',
+      ...(m.locationCol != null && row[m.locationCol] ? { productionLocationIds: [String(row[m.locationCol]).trim()] } : {}),
+    });
   }
   const ICONS = ['📦', '🎨', '🏠', '⚙️', '🔧', '💡', '🚗', '🌿', '🧴', '🔩'];
   return Object.entries(familyMap).map(([famName, products], i) => {
     const fcode = `F${String(i + 1).padStart(3, '0')}`;
     const brand = famName.replace(/\s+/g, '').toUpperCase().slice(0, 8) || `BRAND${fcode}`;
-    return { id: fcode, code: `FAMILY ${fcode}-${famName}`, label: famName, icon: ICONS[i % ICONS.length], brand, group: brand.slice(0, 6), fg: products.map(p => ({ id: p.id, desc: p.desc, abc: 'A', plm: 'EXISTING' })), semi: [], raw: [] };
+    return { id: fcode, code: m.familyCol != null ? famName : `FAMILY ${fcode}-${famName}`, label: famName, icon: ICONS[i % ICONS.length], brand, group: brand.slice(0, 6),
+      fg: products.filter(p => !['HALB', 'ROH'].includes(p.materialType)).map(p => ({ ...p, abc: 'A', plm: 'EXISTING' })),
+      semi: products.filter(p => p.materialType === 'HALB'), raw: products.filter(p => p.materialType === 'ROH') };
   });
 }
 
@@ -1514,13 +1522,14 @@ function extractBom(wb, mapping) {
     const parent    = String(row[m.parentCol    ?? 1] ?? '').trim();
     const seq       = String(row[m.seqCol       ?? 6] ?? '').trim();
     const component = String(row[m.componentCol ?? 7] ?? '').trim();
-    const qty       = parseFloat(row[m.qtyCol   ?? 8]) || 1;
+    const rawQty    = row[m.qtyCol ?? 8];
+    const qty       = rawQty === '' ? 1 : Number(rawQty);
     const uom       = String(row[m.uomCol       ?? 9] ?? '').trim() || 'EA';
     if (!parent || !component) continue;
     const key = `${plant}|${parent}|${component}|${seq}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    if (result.length < 1000) result.push({ plant, parent, component, qty, uom, seq });
+    result.push({ plant, parent, component, qty, uom, seq });
   }
   return result;
 }
@@ -1543,7 +1552,9 @@ function extractResources(wb, mapping) {
     const key = `${locCode}|${resId}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    result.push({ locationId: `LOC-${locCode}`, resourceId: resId, dailyCap, hourlyCap });
+    result.push({ locationId: locCode.startsWith('LOC-') ? locCode : `LOC-${locCode}`, resourceId: resId, dailyCap, hourlyCap,
+      resourceType: m.resourceTypeCol != null ? String(row[m.resourceTypeCol] ?? '').trim() : '',
+      resType: m.restypeCol != null ? String(row[m.restypeCol] ?? '').trim() : '' });
   }
   return result;
 }
@@ -1567,7 +1578,7 @@ function extractRouting(wb, mapping) {
     const key = `${product}|${plant}|${workCenter}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    if (result.length < 1000) result.push({ product, plant, locationId: `LOC-${plant}`, group, operation, workCenter });
+    result.push({ product, plant, locationId: plant.startsWith('LOC-') ? plant : `LOC-${plant}`, group, operation, workCenter });
   }
   return result;
 }
@@ -1616,7 +1627,7 @@ function extractLeadTimes(wb, mapping) {
   return lt;
 }
 
-async function parseExcelToIbpData(bufOrPath, fileName = '') {
+export async function parseExcelToIbpData(bufOrPath, fileName = '', mappingOverride = null) {
   const wb = typeof bufOrPath === 'string'
     ? XLSX.readFile(bufOrPath)
     : XLSX.read(bufOrPath, { type: 'buffer' });
@@ -1630,7 +1641,7 @@ async function parseExcelToIbpData(bufOrPath, fileName = '') {
 
   const sampleText = Object.entries(samples).map(([name, rows]) => {
     const preview = rows.map((r, i) =>
-      `  row${i}: ${r.slice(0, 10).map(v => JSON.stringify(String(v ?? '').slice(0, 30))).join(' | ')}`
+      `  row${i}: ${r.slice(0, 60).map(v => JSON.stringify(String(v ?? '').slice(0, 30))).join(' | ')}`
     ).join('\n');
     return `Sheet "${name}":\n${preview}`;
   }).join('\n\n');
@@ -1710,8 +1721,9 @@ Set any sheet key to null if the sheet does not exist.`;
 
   let mapping;
   try {
+    if (mappingOverride) throw new Error('Using explicit mapping (offline)');
     const r = await callSapAiCore(
-      'You are an SAP IBP data analyst. Return ONLY valid JSON, no explanation, no markdown.',
+      `You are an SAP IBP data analyst. Return ONLY valid JSON, no explanation, no markdown.\n${RULES_PROMPT}\nMap optional typeCol, regionCol, latCol, lonCol, salesAreaCol, uomCol and locationCol if present. Technical exports may have two header rows.`,
       prompt
     );
     const text = (r.content?.[0]?.text || '').trim();
@@ -1720,17 +1732,21 @@ Set any sheet key to null if the sheet does not exist.`;
     console.log('[import-excel] AI mapping:', JSON.stringify(mapping).slice(0, 300));
   } catch (err) {
     console.warn('[import-excel] AI mapping failed, using heuristics:', err.message);
-    mapping = buildFallbackMapping(wb.SheetNames);
+    mapping = mappingOverride || buildFallbackMapping(wb.SheetNames);
   }
+  mapping = { ...mapping, ...technicalMappings(wb) };
 
   // ── Step 3: Extract data using the mapping ──
   const locations       = extractLocations(wb, mapping);
   const customers       = extractCustomers(wb, mapping);
   const productFamilies = extractProductFamilies(wb, mapping);
-  const bom             = extractBom(wb, mapping);
+  const technicalSources = extractTechnicalSources(wb);
+  const bom             = technicalSources.bom.length ? technicalSources.bom : extractBom(wb, mapping);
   const resources       = extractResources(wb, mapping);
-  const routing         = extractRouting(wb, mapping);
+  const routing         = [...(technicalSources.routing.length ? technicalSources.routing : extractRouting(wb, mapping)), ...technicalSources.productionMappings];
   const leadTimes       = extractLeadTimes(wb, mapping);
+  const generationOptions = applyLocationProductMappings(wb, mapping, productFamilies, locations);
+  const actuals = extractActuals(wb, mapping);
 
   console.log(`[import-excel] bom=${bom.length}, resources=${resources.length}, routing=${routing.length}, lt=${JSON.stringify(leadTimes)}`);
 
@@ -1750,6 +1766,8 @@ Set any sheet key to null if the sheet does not exist.`;
     resources,
     routing,
     leadTimes,
+    generationOptions,
+    actuals,
     _importedFromExcel: true,
     _aiMapped: true,
     _meta: { source: fileName },
@@ -1758,7 +1776,7 @@ Set any sheet key to null if the sheet does not exist.`;
 
 // ─── Analysis ─────────────────────────────────────────────────────────────────
 
-const SYSTEM = `You are an SAP IBP Best Practice configuration expert. Return ONLY valid JSON, no explanation.`;
+const SYSTEM = `You are an SAP IBP Best Practice configuration expert. Return ONLY valid JSON, no explanation.\n${RULES_PROMPT}`;
 
 async function analyzeWithClaude(companyName, webInfo) {
   const webCtx = webInfo.pagesContent.length
@@ -1786,7 +1804,7 @@ Return exactly this JSON structure (no markdown):
   ]
 }
 
-Rules: 2-4 product families representing REAL product lines. 3-8 locations (Plants locType=P, DCs locType=D). 3-6 customers. Product IDs unique, use category prefix (e.g. FLOOR-100). Accurate lat/lon.`);
+Rules: 2-4 product families representing REAL product lines. 3-8 locations (Plants locType=P, DCs locType=DC). 3-6 customers. Product IDs unique, use category prefix (e.g. FLOOR-100). Accurate lat/lon. Each product: uomId and productionLocationIds (only its appropriate plants).`);
   const text = (r.content?.[0]?.text || r.choices?.[0]?.message?.content || '').trim();
   const m = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, text];
   return JSON.parse(m[1]);
@@ -1892,7 +1910,8 @@ const server = http.createServer(async (req, res) => {
       res.end(zipBuf);
     } catch (err) {
       console.error('[generate error]', err.message, err.stack);
-      res.writeHead(500); res.end(JSON.stringify({ error: err.message }));
+      res.writeHead(err instanceof GenerationValidationError ? 422 : 500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message, errors: err.errors }));
     }
     return;
   }
@@ -1900,7 +1919,7 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(404); res.end();
 });
 
-server.listen(PORT, () => {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) server.listen(PORT, () => {
   console.log(`\n  IBP Generator → http://localhost:${PORT}`);
   console.log(`  BP ZIP: ${Object.keys(bpData).length ? `${Object.keys(bpData).length} files loaded` : 'NOT FOUND — ' + BP_ZIP_PATH}\n`);
   if (!process.env.ANTHROPIC_API_KEY) console.warn('  ⚠  ANTHROPIC_API_KEY not set\n');
