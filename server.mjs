@@ -194,6 +194,17 @@ function jitter(base, pct = 0.15) {
 const csv = (header, rows) => rows.length ? 'sep=,\n' + header + '\n' + rows.join('\n') : null;
 const csvHeader = (header) => 'sep=,\n' + header + '\n';
 
+// Normalize LOCTYPE to IBP standard codes (P=Plant, DC=Distribution Center, S=Supplier, C=Customer)
+const normLocType = t => {
+  if (!t) return 'P';
+  const u = String(t).trim().toUpperCase();
+  if (u === 'P' || u === 'PLANT' || u.startsWith('PROD') || u === 'FACTORY' || u === 'MFG') return 'P';
+  if (u === 'DC' || u.startsWith('DIST') || u === 'WAREHOUSE' || u === 'WH' || u === 'WHSE' || u === 'LOGISTICS') return 'DC';
+  if (u === 'S' || u === 'SUPPLIER' || u === 'VENDOR') return 'S';
+  if (u === 'C' || u === 'CUSTOMER') return 'C';
+  return u.slice(0, 2);
+};
+
 function sourceId(prdId, locId) {
   return `${prdId.padEnd(18)}${locId.padEnd(18)}S`;
 }
@@ -205,8 +216,11 @@ function gen010Customer(customers) {
   const h = 'CUSTID,COSTCENTER,COSTCENTERDESCR,COSTCENTEROWNER,CPCUSTATT01,CPCUSTATT02,CPCUSTATT03,CUSTBUPAID,CUSTCHANNEL,CUSTCOUNTRY,CUSTDESCR,CUSTGROUP,CUSTGROUPDESC,CUSTREGION,CUSTREGIONDESCR,CUSTSALESREP,CUSTSALESVP,CUSTVALID,EQUIPNR,FLOCDESCR,FLOCID,FUNCTHIER1,FUNCTHIER2,GEOLATITUDE,GEOLONGITUDE,KEYACCOUNT,PLANT,ZXCUSTPRIORITY,ZXKAM,ZXSALESTER,ZXSEGCUSTCHANABCID,ZXSEGCUSTCHANABCLOCKED,ZXSEGCUSTCHANXYZID,ZXSEGCUSTCHANXYZLOCKED,ZXSEGCUSTOMERABCID,ZXSEGCUSTOMERABCLOCKED,ZXSEGCUSTOMERXYZID,ZXSEGCUSTOMERXYZLOCKED,ZXTSM';
   return csv(h, customers.map(c => [
     c.custId, `CC-${c.custId}`, `Cost Center ${c.custId}`, '', '', '', '', '',
-    c.channel, c.country, c.custdescr, c.group, '', '', '',
-    '', '', '', '', '', '', '', '',
+    c.channel, c.country, c.custdescr, c.group, '',
+    c.region || '',             // CUSTREGION
+    '', '', '',
+    'X',                        // CUSTVALID: must be 'X' for active records
+    '', '', '', '', '',
     c.lat || '', c.lon || '',
     '', '', '', '', '', '', '', '', '', '', '', '', '', '',
   ].join(',')));
@@ -215,7 +229,16 @@ function gen010Customer(customers) {
 function gen020Location(locs) {
   const h = 'LOCID,CPLOCATT01,CPLOCATT02,CPLOCATT03,GEOLATITUDE,GEOLONGITUDE,HLOCATIONCOUNTER,HOLDINGCOSTPCT,LOCBUPAID,LOCCITY,LOCCOUNTRY,LOCDESCR,LOCREGION,LOCTYPE,LOCVALID';
   return csv(h, locs.map(l =>
-    `${l.id},,,,${l.lat||''},${l.lon||''},,,,${l.city||''},${l.country||''},${l.desc},${l.region},${l.locType||'P'},`
+    [l.id, '', '', '',
+     l.lat || '', l.lon || '',
+     '', '', '',
+     l.city || l.desc || '',   // LOCCITY: fallback to desc (matches LX format)
+     l.country || '',
+     l.desc,
+     l.region || '',
+     normLocType(l.locType),   // normalize to IBP standard: P / DC / S / C
+     'X',                      // LOCVALID: must be 'X' for active records (LX confirmed)
+    ].join(',')
   ));
 }
 
@@ -235,7 +258,7 @@ function gen030Product(families) {
         p.id, p.abc, p.xlk,
         '', '', f.brand, '', '', '', '', '', '', '', '',
         '', p.type, '', '', 'EXISTING', '',
-        p.desc || p.id, f.code, '', f.group, '', subfam, '', '', '', '',
+        p.desc || p.id, f.code, '', f.group, '', subfam, 'X', '', '', '',  // PRDVALID='X'
         'PIECE', 'PC', p.xyz, '',
         '', '', '', '', '', '', '', '', '', '', '', '', '', '',
       ].join(','));
